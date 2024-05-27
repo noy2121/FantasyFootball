@@ -1,2 +1,2 @@
-# sports_qa
-small scale llm, fine-tuned on sports new.
+# FootballGPT
+small scale llm, fine-tuned on football data.

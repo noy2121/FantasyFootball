@@ -1,5 +1,4 @@
 
-import numpy as np
 import pandas as pd
 
 
@@ -12,38 +11,74 @@ class FootballDataset:
         self.name = name
         self.columns = self.df.columns.tolist()
 
-    def create_text_df_for_valuations(self):
+    def _create_text_df_for_valuations(self):
         """
-        for each row in the df the corresponding row in the text_df will be
-        "first name: fname, lname: last_name date: date, market value in euro: market_value_in_euro, club: club"
+        first name: fname, lname: last_name date: date, market value in euro: market_value_in_euro, club: club
         """
+        club_map = self.dfs['clubs'].set_index('club_id')['name'].to_dict()
         rows = []
         for i, row in self.df.iterrows():
             pid = row['player_id']
+
             first_name = self.dfs['players'].loc[self.dfs['players']['player_id'] == pid]['first_name'].values[0]
             last_name = self.dfs['players'].loc[self.dfs['players']['player_id'] == pid]['last_name'].values[0]
 
-            text = f'first name: {first_name}, last name: {last_name}, '
-            text += ", ".join([f'{" ".join(c.split("_"))}: {row[c]}' for c in self.columns[1:-1]])
+            d = {
+                'first_name': first_name,
+                'last_name': last_name,
+                'date': row['date'],
+                'market_value_in_euro': row['market_value_in_eur'],
+                'club': club_map[row['current_club_id']]
+            }
+            text = ', '.join([f'{" ".join(k.split("_"))}: {v}' for k, v in d.items()])
             rows.append(text)
 
         text_df = pd.DataFrame(data=rows, columns=['text'])
 
         return text_df
 
-    def create_text_df_for_players(self):
-        pass
-
-    def create_text_df_for_appearances(self):
-        pass
-
-    def create_text_df_for_games(self):
+    def _create_text_df_for_players(self):
         """
-        for each row in the df the corresponding row in the text_df will be
-        "competition: c_name, season: s, round: r, date: date, home club: home club name, away club: away club name,
+        name: full name, last_season: ls, current_club_name: ccn, country_of_birth: cb, country_of_citizenship: cc,
+        date_of_birth: dob, position: p, sub_position: sp, foot: f, height_in_cm, market_value_in_euro: m,
+        highest_market_value_in_euro: hm
+        """
+
+        rows = []
+        for i, row in self.df.iterrows():
+            d = {
+                'name': row['name'],
+                'last_season': row['last_season'],
+                'current_club_name': row['current_club_name'],
+                'country_of_birth': row['country_of_birth'],
+                'country_of_citizenship': row['country_of_citizenship'],
+                'date_of_birth': row['date_of_birth'],
+                'position': row['position'],
+                'sub_position': row['sub_position'],
+                'foot': row['foot'],
+                'height_in_cm': row['height_in_cm'],
+                'market_value_in_euro': row['market_value_in_eur'],
+                'highest_market_value_in_euro': row['highest_market_value_in_eur']
+            }
+            text = ', '.join([f'{" ".join(k.split("_"))}: {v}' for k, v in d.items()])
+            rows.append(text)
+
+        text_df = pd.DataFrame(data=rows, columns=['text'])
+
+        return text_df
+
+    def _create_text_df_for_appearances(self):
+        """
+        a bit tricky, need more work
+        """
+        pass
+
+    def _create_text_df_for_games(self):
+        """
+        competition: c_name, season: s, round: r, date: date, home club: home club name, away club: away club name,
         home goals: hg, away goals: ag, home club position: hcp, away club position: acp, home club manager: hcm,
         away club manager: acm, stadium: s, attendance: a, referee: ref, home club formation: hcf,
-        away club formation: acf, competition type: ct"
+        away club formation: acf, competition type: ct
         """
 
         competition_map = self.dfs['competitions'].set_index('competition_id')['name'].to_dict()
@@ -57,12 +92,12 @@ class FootballDataset:
                 'date': row['date'],
                 'home_club_name': row['home_club_name'],
                 'away_club_name': row['away_club_name'],
-                'home_goals': row['home_goals'],
-                'away_goals': row['away_goals'],
+                'home_club_goals': row['home_club_goals'],
+                'away_club_goals': row['away_club_goals'],
                 'home_club_position': row['home_club_position'],
                 'away_club_position': row['away_club_position'],
-                'home_club_manager': row['home_club_manager'],
-                'away_club_manager': row['away_club_manager'],
+                'home_club_manager_name': row['home_club_manager_name'],
+                'away_club_manager_name': row['away_club_manager_name'],
                 'stadium': row['stadium'],
                 'attendance': row['attendance'],
                 'referee': row['referee'],
@@ -85,13 +120,13 @@ class FootballDataset:
         """
 
         if self.name == 'player_valuations':
-            return self.create_text_df_for_valuations()
+            return self._create_text_df_for_valuations()
         elif self.name == 'players':
-            return self.create_text_df_for_players()
+            return self._create_text_df_for_players()
         elif self.name == 'appearances':
-            return self.create_text_df_for_appearances()
+            return self._create_text_df_for_appearances()
         elif self.name == 'games':
-            return self.create_text_df_for_games()
+            return self._create_text_df_for_games()
 
     def __str__(self):
         return f'{self.name}\n{self.df.head(10)}'

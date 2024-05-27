@@ -5,9 +5,8 @@ from torch.utils.data import Dataset
 
 class FootballTorchDataset(Dataset):
 
-    def __init__(self, ds_name, encodings, transform=None):
+    def __init__(self, encodings, transform=None):
 
-        self.name = ds_name
         self.encodings = encodings
 
     def __getitem__(self, idx):

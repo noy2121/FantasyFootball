@@ -1,4 +1,7 @@
 import os
+import logging
+logger = logging.getLogger(__name__)
+
 import random
 import torch
 import numpy as np
@@ -21,11 +24,17 @@ def get_root_dir():
     return str(root_dir)
 
 
-def load_datasets():
+def load_datasets(filenames=None):
+
     root_dir = get_root_dir()
     data_dir = os.path.join(root_dir, 'data')
-    dfs = {str(Path(filename).stem): pd.read_csv(f'{data_dir}/{filename}', keep_default_na=False) for filename in
-           os.listdir(data_dir) if Path(filename).suffix == '.csv'}
+
+    if filenames is None:  # load all datasets
+        dfs = {str(Path(fn).stem): pd.read_csv(f'{data_dir}/{fn}', keep_default_na=False) for fn in
+               os.listdir(data_dir) if Path(fn).suffix == '.csv'}
+    else:  # load only datasets specified in config
+        dfs = {fn: pd.read_csv(f'{data_dir}/{fn}', keep_default_na=False) for fn in filenames
+               if Path(fn).exists() and Path(fn).suffix == '.csv'}
     print(f'Load {len(dfs)} different datasets:')
     for k, v in dfs.items():
         print(f'\t- {k}: shape {v.shape}')

@@ -1,13 +1,21 @@
 import os
 import torch
 import logging
+
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+streamhandler = logging.StreamHandler()
+streamhandler.setLevel(logging.DEBUG)
+streamhandler.setFormatter(formatter)
+logger.addHandler(streamhandler)
+
 from transformers import pipeline
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from transformers import BitsAndBytesConfig, TrainingArguments
 from trl import SFTTrainer
-import peft
 import numpy as np
 import pandas as pd
+import hydra
 
 from pathlib import Path
 from peft import LoraConfig, PrefixTuningConfig, AdaLoraConfig, LoKrConfig
@@ -16,12 +24,13 @@ from src.model.data_preprocess.football_torch_dataset import FootballTorchDatase
 from src.model.data_preprocess.data_preperation import prepare_data
 
 
-def config_quantization():
+def config_quantization(cfg):
+    logger.info('configure quantization parameters')
     conf = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type='nf4',
-        bnb_4bit_compute_dtype='float16',
-        bnb_4bit_use_double_quant=False
+        load_in_4bit=cfg.load_in_4bit,
+        bnb_4bit_quant_type=cfg.quant_type,
+        bnb_4bit_compute_dtype=cfg.quant_compute_dtype,
+        bnb_4bit_use_double_quant=cfg.use_double_quant,
     )
 
     # # check GPU compatibility with bfloat16
@@ -36,14 +45,19 @@ def config_quantization():
     return conf
 
 
-def set_peft_config(method_name):
+def set_peft_config(cfg):
+
+    method_name = cfg.method
+
     # define peft methods and configurations
     if method_name == 'lora':
-        config = LoraConfig(r=64, lora_alpha=16, target_modules=["c_attn"], lora_dropout=0.1, bias='none')
+        config = LoraConfig(r=cfg.r, lora_alpha=cfg.lora_a, target_modules=cfg.target_modules,
+                            lora_dropout=cfg.dropout, bias='none')
     elif method_name == 'adalora':
-        config = AdaLoraConfig(r=8, lora_alpha=32, target_modules=["c_attn"], lora_dropout=0.01)
+        config = AdaLoraConfig(r=cfg.r, lora_alpha=cfg.lora_a, target_modules=cfg.target_modules,
+                               lora_dropout=cfg.dropout)
     elif method_name == 'lokr':
-        config = LoKrConfig(r=8, lora_alpha=32, target_modules=["c_attn", "c_proj", "c_fc"])
+        config = LoKrConfig(r=cfg.r, lora_alpha=cfg.lora_a, target_modules=cfg.target_modules)
     else:
         config = PrefixTuningConfig(num_virtual_tokens=20, token_dim=768, num_transformer_submodules=1,
                                     num_attention_heads=12, num_layers=12, encoder_hidden_size=768)
@@ -51,21 +65,21 @@ def set_peft_config(method_name):
     return config
 
 
-def set_training_config(root_dir):
-    checkpoint_name = './results'
+def set_training_config(cfg, root_dir):
+    checkpoint_name = cfg.checkpoint_name
     out_dir = os.path.join(root_dir, checkpoint_name)
     Path(out_dir).mkdir(parents=True, exists_ok=True)
 
     training_args = TrainingArguments(
         output_dir=out_dir,
-        num_train_epochs=3,
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=1,
-        optim='paged_adamw_32bit',
-        save_steps=1000,
-        logging_steps=1000,
-        learning_rate=2e-4,
-        weight_decay=0.001,
+        num_train_epochs=cfg.num_epochs,
+        per_device_train_batch_size=cfg.batch_size,
+        gradient_accumulation_steps=cfg.gradient_accumulation_steps,
+        optim=cfg.optim,
+        save_steps=cfg.save_steps,
+        logging_steps=cfg.logging_steps,
+        learning_rate=cfg.learning_rate,
+        weight_decay=cfg.weight_decay,
         fp16=False,
         bf16=False,
         max_grad_norm=0.3,
@@ -79,15 +93,18 @@ def set_training_config(root_dir):
     return training_args
 
 
-def train():
+@hydra.main(config_path='../config', config_name='conf')
+def train(cfg):
 
     root_dir = get_root_dir()
+
     # set up quantization config
     device_map = {"": 0}
-    bnb_config = config_quantization()
+    bnb_config = config_quantization(cfg.model)
 
     # load base model
-    base_model_name = 'bigscience/bloomz-560m'  # bigscience/bloomz-560m
+    base_model_name = cfg.model.model_name
+    logger.info(f'load model {base_model_name}')
     foundation_model = AutoModelForCausalLM.from_pretrained(base_model_name,
                                                             quantization_config=bnb_config,
                                                             device_map=device_map)
@@ -100,20 +117,22 @@ def train():
     tokenizer.padding_side = 'right'
 
     # load data, tokenize and prepare it for training
-    text_dfs = prepare_data()
+    text_dfs = prepare_data(cfg.data)
     combined_text_df = pd.concat([df for df in text_dfs.values()], ignore_index=True)
     inputs = tokenizer(combined_text_df['text'].tolist(), max_length=512, truncation=True, padding='max_length',
                        return_tensors='pt')    # transform datasets to pytorch Dataset instance
     football_ds = FootballTorchDataset(inputs)
 
     # define peft methods and configurations
-    method_name = 'lora'  # load from config
-    peft_config = set_peft_config(method_name)
+    logger.info(f'configure {cfg.peft.method_name} for PEFT')
+    peft_config = set_peft_config(cfg.peft)
 
     # define training args
-    training_args = set_training_config(root_dir)
+    training_args = set_training_config(cfg.train, root_dir)
 
     # train
+    logger.info('start training')
+    print("=" * 80)
     trainer = SFTTrainer(
         model=foundation_model,
         train_dataset=football_ds,
@@ -125,8 +144,10 @@ def train():
         packing=False
     )
     trainer.train()
+    print("=" * 80)
 
-    trainer.model.save_pretrained(f'{base_model_name}-football-{method_name}-ft')
+    logger.info('save fine-tuned model')
+    trainer.model.save_pretrained(f'{base_model_name}-football-{cfg.peft.method_name}-ft')
 
 
 if __name__ == '__main__':

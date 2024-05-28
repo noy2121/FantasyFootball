@@ -1,5 +1,7 @@
 data:
   datasets: ['player_valuations']
+  bucket: 'deep-learning-projects'
+  data_folder: 'sagemaker/FootballGPT_Data'
 
 model:
   model_name: 'bigscience/bloomz-560m'

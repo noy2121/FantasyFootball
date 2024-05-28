@@ -1,5 +1,4 @@
 import os
-import torch
 import logging
 
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -9,19 +8,19 @@ streamhandler.setLevel(logging.DEBUG)
 streamhandler.setFormatter(formatter)
 logger.addHandler(streamhandler)
 
-from transformers import pipeline
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from transformers import BitsAndBytesConfig, TrainingArguments
-from trl import SFTTrainer
 import numpy as np
 import pandas as pd
 import hydra
 
+from sagemaker import hyperparameters
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import BitsAndBytesConfig, TrainingArguments
+from trl import SFTTrainer
 from pathlib import Path
 from peft import LoraConfig, PrefixTuningConfig, AdaLoraConfig, LoKrConfig
+
 from src.utils.utils import set_random_seed, get_root_dir
 from src.model.data_preprocess.football_torch_dataset import FootballTorchDataset
-from src.model.data_preprocess.data_preperation import prepare_data
 
 
 def config_quantization(cfg):
@@ -93,6 +92,30 @@ def set_training_config(cfg, root_dir):
     return training_args
 
 
+def tokenize(cfg, tokenizer):
+
+    # load data from s3 bucket
+    data_location = f's3://{cfg.bucket}/{cfg.folder}'
+    if cfg.datasets is not None:  # read only specified datasets
+        dfs = [pd.read_csv(f'{data_location}/{ds}.csv') for ds in cfg.datasets]
+    else:  # read all available datasets
+        dfs = [pd.read_csv(f'{data_location}/{ds}') for ds in os.listdir(data_location)
+               if Path(f'{data_location}/{ds}.csv').exists() and Path(f'{data_location}/{ds}').suffix == '.csv']
+
+    if len(dfs) > 1:
+        combined_df = pd.concat([df for df in dfs], ignore_index=True)
+    combined_df = combined_df.dropna()  # Drop rows with missing values
+
+    # tokenize all data
+    inputs = tokenizer(combined_df['text'].tolist(), max_length=512, truncation=True, padding='max_length',
+                       return_tensors='pt')
+
+    # transform datasets to pytorch Dataset instance
+    ds = FootballTorchDataset(inputs)
+
+    return ds
+
+
 @hydra.main(config_path='../config', config_name='conf')
 def train(cfg):
 
@@ -117,11 +140,7 @@ def train(cfg):
     tokenizer.padding_side = 'right'
 
     # load data, tokenize and prepare it for training
-    text_dfs = prepare_data(cfg.data)
-    combined_text_df = pd.concat([df for df in text_dfs.values()], ignore_index=True)
-    inputs = tokenizer(combined_text_df['text'].tolist(), max_length=512, truncation=True, padding='max_length',
-                       return_tensors='pt')    # transform datasets to pytorch Dataset instance
-    football_ds = FootballTorchDataset(inputs)
+    train_ds = tokenize(cfg.data, tokenizer)
 
     # define peft methods and configurations
     logger.info(f'configure {cfg.peft.method_name} for PEFT')
@@ -135,7 +154,7 @@ def train(cfg):
     print("=" * 80)
     trainer = SFTTrainer(
         model=foundation_model,
-        train_dataset=football_ds,
+        train_dataset=train_ds,
         peft_config=peft_config,
         dataset_text_field="text",
         max_seq_length=None,

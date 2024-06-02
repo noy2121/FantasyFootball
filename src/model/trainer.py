@@ -1,46 +1,42 @@
 import os
 import torch
-import logging
-
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-streamhandler = logging.StreamHandler()
-streamhandler.setLevel(logging.DEBUG)
-streamhandler.setFormatter(formatter)
-logger.addHandler(streamhandler)
-
-from transformers import pipeline
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from transformers import BitsAndBytesConfig, TrainingArguments
-from trl import SFTTrainer
 import numpy as np
 import pandas as pd
 import hydra
+import json
+import s3fs
 
+from datasets import load_dataset, concatenate_datasets
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import BitsAndBytesConfig, TrainingArguments
+from trl import SFTTrainer
 from pathlib import Path
-from peft import LoraConfig, PrefixTuningConfig, AdaLoraConfig, LoKrConfig
+from peft import LoraConfig, PrefixTuningConfig, AdaLoraConfig, LoKrConfig, get_peft_model
+
 from src.utils.utils import set_random_seed, get_root_dir
 from src.model.data_preprocess.football_torch_dataset import FootballTorchDataset
 from src.model.data_preprocess.data_preperation import prepare_data
 
 
+def check_gpu():
+    is_avialabe = torch.cuda.is_available()
+    if not is_avialabe:
+        raise 'No GPU has found! Exit!'
+    device_count = torch.cuda.device_count()
+    curr_device = torch.cuda.current_device()
+    print(f'Device count: {device_count}')
+    print(f'Current device: {curr_device}')
+    print(f'Device name: {torch.cuda.get_device_name(curr_device)}')
+
+
 def config_quantization(cfg):
-    logger.info('configure quantization parameters')
+    print('configure quantization parameters')
     conf = BitsAndBytesConfig(
         load_in_4bit=cfg.load_in_4bit,
         bnb_4bit_quant_type=cfg.quant_type,
         bnb_4bit_compute_dtype=cfg.quant_compute_dtype,
         bnb_4bit_use_double_quant=cfg.use_double_quant,
     )
-
-    # # check GPU compatibility with bfloat16
-    # compute_dtype = getattr(torch, 'float16')
-    # if compute_dtype == torch.float16:
-    #     major, _ = torch.cuda.get_device_capability()
-    #     if major >= 8:
-    #         print("=" * 80)
-    #         print("Your GPU supports bfloat16: accelerate training with bf16=True")
-    #         print("=" * 80)
 
     return conf
 
@@ -93,51 +89,61 @@ def set_training_config(cfg, root_dir):
     return training_args
 
 
+def tokenize(x, tokenizer):
+    pass
+
+
 @hydra.main(config_path='../config', config_name='conf')
 def train(cfg):
 
     root_dir = get_root_dir()
 
+    # check available gpu
+    # check_gpu()
+
     # set up quantization config
     device_map = {"": 0}
-    bnb_config = config_quantization(cfg.model)
+    # bnb_config = config_quantization(cfg.model)
 
     # load base model
     base_model_name = cfg.model.model_name
-    logger.info(f'load model {base_model_name}')
-    foundation_model = AutoModelForCausalLM.from_pretrained(base_model_name,
-                                                            quantization_config=bnb_config,
-                                                            device_map=device_map)
+    print(f'load model {base_model_name}')
+    foundation_model = AutoModelForCausalLM.from_pretrained(base_model_name, use_auth_token=cfg.model.huggingface_token)
+    # foundation_model = AutoModelForCausalLM.from_pretrained(base_model_name,
+    #                                                         quantization_config=bnb_config,
+    #                                                         device_map=device_map,
+    #                                                         use_auth_token=cfg.model.huggingface_token)
     foundation_model.config.use_cache = False
     foundation_model.config.pretraining_tp = 1
 
     # load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(base_model_name, trust_remote_code=True)
     tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = 'right'
+    tokenizer.add_eos_token = True
 
-    # load data, tokenize and prepare it for training
-    text_dfs = prepare_data(cfg.data)
-    combined_text_df = pd.concat([df for df in text_dfs.values()], ignore_index=True)
-    inputs = tokenizer(combined_text_df['text'].tolist(), max_length=512, truncation=True, padding='max_length',
-                       return_tensors='pt')    # transform datasets to pytorch Dataset instance
-    football_ds = FootballTorchDataset(inputs)
+    # load data
+    data_location = f'{cfg.data.json_files_path}'
+    players_ds = load_dataset('json', data_files=f'{data_location}/players.jsonl', split='train')
+    games_ds = load_dataset('json', data_files=f'{data_location}/games.jsonl', split='train')
+    train_ds = concatenate_datasets([players_ds, games_ds])
+    # tokenized_ds = train_ds.map(lambda s: tokenize(s, tokenizer), batch=True)
 
     # define peft methods and configurations
-    logger.info(f'configure {cfg.peft.method_name} for PEFT')
+    print(f'configure {cfg.peft.method_name} for PEFT')
     peft_config = set_peft_config(cfg.peft)
+    peft_model = get_peft_model(foundation_model, peft_config)
+    print(peft_model.print_trainable_parameters())
 
     # define training args
     training_args = set_training_config(cfg.train, root_dir)
 
     # train
-    logger.info('start training')
+    print('start training')
     print("=" * 80)
     trainer = SFTTrainer(
         model=foundation_model,
-        train_dataset=football_ds,
+        train_dataset=train_ds,
         peft_config=peft_config,
-        dataset_text_field="text",
         max_seq_length=None,
         tokenizer=tokenizer,
         args=training_args,
@@ -146,7 +152,7 @@ def train(cfg):
     trainer.train()
     print("=" * 80)
 
-    logger.info('save fine-tuned model')
+    print('save fine-tuned model')
     trainer.model.save_pretrained(f'{base_model_name}-football-{cfg.peft.method_name}-ft')
 
 

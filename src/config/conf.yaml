@@ -1,12 +1,15 @@
 data:
-  datasets: ['player_valuations']
+  bucket: 'deep-learning-projects'
+  datasets: ['players', 'games']
+  json_files_path: 'FootballGPT/data/jsons'
 
 model:
-  model_name: 'bigscience/bloomz-560m'
+  model_name: 'mistralai/Mistral-7B-v0.1'  # bigscience/bloomz-560m
   load_in_4bit: True
   quant_type: 'nf4'
   quant_compute_dtype: 'float16'
   use_double_quant: False
+  huggingface_token_path: None
 
 peft:
   method: 'lora'

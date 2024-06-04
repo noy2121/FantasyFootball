@@ -1,4 +1,6 @@
 import os
+import sys
+
 import torch
 import numpy as np
 import pandas as pd
@@ -6,16 +8,14 @@ import hydra
 import json
 import s3fs
 
-from datasets import load_dataset, concatenate_datasets
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from transformers import BitsAndBytesConfig, TrainingArguments
+from datasets import load_dataset
+from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer
+from transformers import BitsAndBytesConfig, TrainingArguments, DataCollatorForLanguageModeling
 from trl import SFTTrainer
 from pathlib import Path
 from peft import LoraConfig, PrefixTuningConfig, AdaLoraConfig, LoKrConfig, get_peft_model
 
 from src.utils.utils import set_random_seed, get_root_dir
-from src.model.data_preprocess.football_torch_dataset import FootballTorchDataset
-from src.model.data_preprocess.data_preperation import prepare_data
 
 
 def check_gpu():
@@ -64,25 +64,14 @@ def set_peft_config(cfg):
 def set_training_config(cfg, root_dir):
     checkpoint_name = cfg.checkpoint_name
     out_dir = os.path.join(root_dir, checkpoint_name)
-    Path(out_dir).mkdir(parents=True, exists_ok=True)
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
 
     training_args = TrainingArguments(
         output_dir=out_dir,
+        no_cuda=True,
         num_train_epochs=cfg.num_epochs,
         per_device_train_batch_size=cfg.batch_size,
-        gradient_accumulation_steps=cfg.gradient_accumulation_steps,
-        optim=cfg.optim,
-        save_steps=cfg.save_steps,
-        logging_steps=cfg.logging_steps,
         learning_rate=cfg.learning_rate,
-        weight_decay=cfg.weight_decay,
-        fp16=False,
-        bf16=False,
-        max_grad_norm=0.3,
-        max_steps=-1,
-        warmup_ratio=0.03,
-        group_by_length=True,
-        lr_scheduler_type='constant',
         report_to="tensorboard"
     )
 
@@ -90,7 +79,7 @@ def set_training_config(cfg, root_dir):
 
 
 def tokenize(x, tokenizer):
-    pass
+    return tokenizer(x['text'], padding='max_length', truncation=True)
 
 
 @hydra.main(config_path='../config', config_name='conf')
@@ -103,33 +92,49 @@ def train(cfg):
 
     # set up quantization config
     device_map = {"": 0}
-    # bnb_config = config_quantization(cfg.model)
+    # bnb_config = config_quantization(cfg.fine-tune)
 
-    # load base model
+    with open(os.path.join(root_dir, cfg.model.huggingface_token_filepath)) as f:
+        auth_token = f.readline().rstrip()
+
+    # load base fine-tune
     base_model_name = cfg.model.model_name
-    print(f'load model {base_model_name}')
-    foundation_model = AutoModelForCausalLM.from_pretrained(base_model_name, use_auth_token=cfg.model.huggingface_token)
+    print(f'load pre-trained model {base_model_name}')
+    foundation_model = AutoModelForCausalLM.from_pretrained(base_model_name, cache_dir=cfg.model.cache_dir, token=auth_token)
     # foundation_model = AutoModelForCausalLM.from_pretrained(base_model_name,
     #                                                         quantization_config=bnb_config,
     #                                                         device_map=device_map,
-    #                                                         use_auth_token=cfg.model.huggingface_token)
-    foundation_model.config.use_cache = False
+    #                                                         use_auth_token=cfg.fine-tune.huggingface_token.txt)
     foundation_model.config.pretraining_tp = 1
 
     # load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(base_model_name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(base_model_name, cache_dir=cfg.model.cache_dir)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.add_eos_token = True
 
-    # load data
-    data_location = f'{cfg.data.json_files_path}'
-    players_ds = load_dataset('json', data_files=f'{data_location}/players.jsonl', split='train')
-    games_ds = load_dataset('json', data_files=f'{data_location}/games.jsonl', split='train')
-    train_ds = concatenate_datasets([players_ds, games_ds])
-    # tokenized_ds = train_ds.map(lambda s: tokenize(s, tokenizer), batch=True)
+    # prepare data - data format for bloomz model is different from Mistral-7B
+    data_location = f'{cfg.data.data_files_path}'
+    if 'bloomz' in base_model_name:
+        train_ds = load_dataset('csv',
+                                  data_files=[f'{data_location}/csvs/players-text.csv',
+                                              f'{data_location}/csvs/games-text.csv'],
+                                  split='train')
+    elif 'Mistral' in base_model_name:
+        players_ds = load_dataset('json',
+                                  data_files=[f'{data_location}/jsons/players.jsonl',
+                                              f'{data_location}/jsons/games.jsonl'],
+                                  split='train')
+    else:
+        raise ValueError(f'model name {base_model_name} not excepted! please choose between [Mistral-7B, bloomz-560m]')
+
+    # tokenized data
+    tokenized_ds = train_ds.map(lambda s: tokenize(s, tokenizer), batched=True)
+    tokenized_ds = tokenized_ds.remove_columns(['text'])
+    tokenized_ds.set_format('torch')
+    tokenized_ds = tokenized_ds.shuffle().select(range(10000))
 
     # define peft methods and configurations
-    print(f'configure {cfg.peft.method_name} for PEFT')
+    print(f'configure {cfg.peft.method} for PEFT')
     peft_config = set_peft_config(cfg.peft)
     peft_model = get_peft_model(foundation_model, peft_config)
     print(peft_model.print_trainable_parameters())
@@ -140,19 +145,17 @@ def train(cfg):
     # train
     print('start training')
     print("=" * 80)
-    trainer = SFTTrainer(
-        model=foundation_model,
-        train_dataset=train_ds,
-        peft_config=peft_config,
-        max_seq_length=None,
-        tokenizer=tokenizer,
+    trainer = Trainer(
+        model=peft_model,
         args=training_args,
-        packing=False
+        train_dataset=tokenized_ds,
+        tokenizer=tokenizer,
+        data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False)
     )
     trainer.train()
     print("=" * 80)
 
-    print('save fine-tuned model')
+    print('save fine-tuned fine-tune')
     trainer.model.save_pretrained(f'{base_model_name}-football-{cfg.peft.method_name}-ft')
 
 

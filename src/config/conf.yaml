@@ -1,15 +1,16 @@
 data:
   bucket: 'deep-learning-projects'
   datasets: ['players', 'games']
-  json_files_path: 'FootballGPT/data/jsons'
+  data_files_path: 'C:\Users\Noy\PycharmProjects\FootballGPT\data'
 
 model:
-  model_name: 'mistralai/Mistral-7B-v0.1'  # bigscience/bloomz-560m
+  model_name: 'bigscience/bloomz-560m'   # mistralai/Mistral-7B-Instruct-v0.2, mistralai/Mistral-7B-v0.1,
   load_in_4bit: True
   quant_type: 'nf4'
   quant_compute_dtype: 'float16'
   use_double_quant: False
-  huggingface_token_path: None
+  cache_dir: 'C:\Users\Noy\.cache\huggingface'
+  huggingface_token_filepath: 'data/keys/huggingface_token.txt'
 
 peft:
   method: 'lora'

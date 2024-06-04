@@ -1,6 +1,6 @@
 /data/
 /venv/
 /src/testim.py
-/src/model/outputs
+/src/fine-tune/outputs
 
 *.idea

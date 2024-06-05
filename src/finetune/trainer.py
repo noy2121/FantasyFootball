@@ -15,6 +15,7 @@ from trl import SFTTrainer
 from pathlib import Path
 from peft import LoraConfig, PrefixTuningConfig, AdaLoraConfig, LoKrConfig, get_peft_model
 
+from src.finetune.evaluator import compute_metrics
 from src.utils.utils import set_random_seed, get_root_dir
 
 
@@ -42,7 +43,6 @@ def config_quantization(cfg):
 
 
 def set_peft_config(cfg):
-
     method_name = cfg.method
 
     # define peft methods and configurations
@@ -72,7 +72,7 @@ def set_training_config(cfg, root_dir):
         num_train_epochs=cfg.num_epochs,
         per_device_train_batch_size=cfg.batch_size,
         learning_rate=cfg.learning_rate,
-        report_to="tensorboard"
+        eval_strategy='epoch'
     )
 
     return training_args
@@ -84,7 +84,6 @@ def tokenize(x, tokenizer):
 
 @hydra.main(config_path='../config', config_name='conf')
 def train(cfg):
-
     root_dir = get_root_dir()
 
     # check available gpu
@@ -92,19 +91,20 @@ def train(cfg):
 
     # set up quantization config
     device_map = {"": 0}
-    # bnb_config = config_quantization(cfg.fine-tune)
+    # bnb_config = config_quantization(cfg.finetune)
 
     with open(os.path.join(root_dir, cfg.model.huggingface_token_filepath)) as f:
         auth_token = f.readline().rstrip()
 
-    # load base fine-tune
+    # load base finetune
     base_model_name = cfg.model.model_name
     print(f'load pre-trained model {base_model_name}')
-    foundation_model = AutoModelForCausalLM.from_pretrained(base_model_name, cache_dir=cfg.model.cache_dir, token=auth_token)
+    foundation_model = AutoModelForCausalLM.from_pretrained(base_model_name, cache_dir=cfg.model.cache_dir,
+                                                            token=auth_token)
     # foundation_model = AutoModelForCausalLM.from_pretrained(base_model_name,
     #                                                         quantization_config=bnb_config,
     #                                                         device_map=device_map,
-    #                                                         use_auth_token=cfg.fine-tune.huggingface_token.txt)
+    #                                                         use_auth_token=cfg.finetune.huggingface_token.txt)
     foundation_model.config.pretraining_tp = 1
 
     # load tokenizer
@@ -115,10 +115,15 @@ def train(cfg):
     # prepare data - data format for bloomz model is different from Mistral-7B
     data_location = f'{cfg.data.data_files_path}'
     if 'bloomz' in base_model_name:
-        train_ds = load_dataset('csv',
-                                  data_files=[f'{data_location}/csvs/players-text.csv',
-                                              f'{data_location}/csvs/games-text.csv'],
-                                  split='train')
+        data_files = {'train': [f'{data_location}/train_games.csv', f'{data_location}/train_players.csv'],
+                      'validation': [f'{data_location}/val_games.csv', f'{data_location}/val_players.csv']}
+        ds = load_dataset('csv',
+                                data_files=data_files)
+        train_ds = ds["train"]
+        val_ds = ds["validation"]
+        print(ds)
+        sys.exit(2)
+
     elif 'Mistral' in base_model_name:
         players_ds = load_dataset('json',
                                   data_files=[f'{data_location}/jsons/players.jsonl',
@@ -128,10 +133,13 @@ def train(cfg):
         raise ValueError(f'model name {base_model_name} not excepted! please choose between [Mistral-7B, bloomz-560m]')
 
     # tokenized data
-    tokenized_ds = train_ds.map(lambda s: tokenize(s, tokenizer), batched=True)
-    tokenized_ds = tokenized_ds.remove_columns(['text'])
-    tokenized_ds.set_format('torch')
-    tokenized_ds = tokenized_ds.shuffle().select(range(10000))
+    tokenized_train_ds = train_ds.map(lambda s: tokenize(s, tokenizer), batched=True)
+    tokenized_train_ds = tokenized_train_ds.remove_columns(['text'])
+    tokenized_train_ds.set_format('torch')
+
+    tokenized_val_ds = val_ds.map(lambda s: tokenize(s, tokenizer), batched=True)
+    tokenized_val_ds = tokenized_val_ds.remove_columns(['text'])
+    tokenized_val_ds.set_format('torch')
 
     # define peft methods and configurations
     print(f'configure {cfg.peft.method} for PEFT')
@@ -148,14 +156,16 @@ def train(cfg):
     trainer = Trainer(
         model=peft_model,
         args=training_args,
-        train_dataset=tokenized_ds,
+        train_dataset=tokenized_train_ds,
+        eval_dataset=tokenized_val_ds,
         tokenizer=tokenizer,
-        data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False)
+        data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+        compute_metrics=compute_metrics
     )
     trainer.train()
     print("=" * 80)
 
-    print('save fine-tuned fine-tune')
+    print('save fine-tuned finetune')
     trainer.model.save_pretrained(f'{base_model_name}-football-{cfg.peft.method_name}-ft')
 
 

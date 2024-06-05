@@ -114,7 +114,7 @@ class FootballDataset:
     def create_text_df(self):
         """
         create a text_df for each df with shape (n_rows, 1) containing only text, so we could fine tune the
-        fine-tune on sentences and not tabular data
+        finetune on sentences and not tabular data
 
         :return: pd.DataFrame in the corresponding format
         """

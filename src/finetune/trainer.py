@@ -68,7 +68,6 @@ def set_training_config(cfg, root_dir):
 
     training_args = TrainingArguments(
         output_dir=out_dir,
-        no_cuda=True,
         num_train_epochs=cfg.num_epochs,
         per_device_train_batch_size=cfg.batch_size,
         learning_rate=cfg.learning_rate,
@@ -87,11 +86,11 @@ def train(cfg):
     root_dir = get_root_dir()
 
     # check available gpu
-    # check_gpu()
+    check_gpu()
 
     # set up quantization config
     device_map = {"": 0}
-    # bnb_config = config_quantization(cfg.finetune)
+    bnb_config = config_quantization(cfg.finetune)
 
     with open(os.path.join(root_dir, cfg.model.huggingface_token_filepath)) as f:
         auth_token = f.readline().rstrip()
@@ -99,30 +98,29 @@ def train(cfg):
     # load base finetune
     base_model_name = cfg.model.model_name
     print(f'load pre-trained model {base_model_name}')
-    foundation_model = AutoModelForCausalLM.from_pretrained(base_model_name, cache_dir=cfg.model.cache_dir,
+    cache_dir = os.path.join(root_dir, cfg.model.cache_dir)
+    # foundation_model = AutoModelForCausalLM.from_pretrained(base_model_name, token=auth_token, cache_dir=cache_dir)
+    foundation_model = AutoModelForCausalLM.from_pretrained(base_model_name,
+                                                            quantization_config=bnb_config,
+                                                            device_map=device_map,
+                                                            cache_dir=cache_dir,
                                                             token=auth_token)
-    # foundation_model = AutoModelForCausalLM.from_pretrained(base_model_name,
-    #                                                         quantization_config=bnb_config,
-    #                                                         device_map=device_map,
-    #                                                         use_auth_token=cfg.finetune.huggingface_token.txt)
     foundation_model.config.pretraining_tp = 1
 
     # load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(base_model_name, cache_dir=cfg.model.cache_dir)
+    tokenizer = AutoTokenizer.from_pretrained(base_model_name, cache_dir=cache_dir)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.add_eos_token = True
 
     # prepare data - data format for bloomz model is different from Mistral-7B
-    data_location = f'{cfg.data.data_files_path}'
+    data_location = os.path.join(root_dir, cfg.data.data_files_path)
     if 'bloomz' in base_model_name:
         data_files = {'train': [f'{data_location}/train_games.csv', f'{data_location}/train_players.csv'],
                       'validation': [f'{data_location}/val_games.csv', f'{data_location}/val_players.csv']}
-        ds = load_dataset('csv',
-                                data_files=data_files)
+        ds = load_dataset('csv', data_files=data_files)
         train_ds = ds["train"]
         val_ds = ds["validation"]
         print(ds)
-        sys.exit(2)
 
     elif 'Mistral' in base_model_name:
         players_ds = load_dataset('json',
@@ -133,6 +131,7 @@ def train(cfg):
         raise ValueError(f'model name {base_model_name} not excepted! please choose between [Mistral-7B, bloomz-560m]')
 
     # tokenized data
+    print('\ntokenize dataset')
     tokenized_train_ds = train_ds.map(lambda s: tokenize(s, tokenizer), batched=True)
     tokenized_train_ds = tokenized_train_ds.remove_columns(['text'])
     tokenized_train_ds.set_format('torch')

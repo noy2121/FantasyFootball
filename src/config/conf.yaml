@@ -1,7 +1,7 @@
 data:
   bucket: 'deep-learning-projects'
   datasets: ['players', 'games']
-  data_files_path: 'C:\Users\Noy\PycharmProjects\FootballGPT\data'
+  data_files_path: 'data'
 
 model:
   model_name: 'bigscience/bloomz-560m'   # mistralai/Mistral-7B-Instruct-v0.2, mistralai/Mistral-7B-v0.1,
@@ -9,7 +9,7 @@ model:
   quant_type: 'nf4'
   quant_compute_dtype: 'float16'
   use_double_quant: False
-  cache_dir: 'C:\Users\Noy\.cache\huggingface'
+  cache_dir: '.cache\huggingface'
   huggingface_token_filepath: 'data/keys/huggingface_token.txt'
 
 peft:

@@ -29,6 +29,9 @@ def check_gpu():
     print(f'Current device: {curr_device}')
     print(f'Device name: {torch.cuda.get_device_name(curr_device)}')
 
+    # clear GPU memory
+    torch.cuda.empty_cache()
+
 
 def config_quantization(cfg):
     print('configure quantization parameters')
@@ -47,8 +50,8 @@ def set_peft_config(cfg):
 
     # define peft methods and configurations
     if method_name == 'lora':
-        config = LoraConfig(r=cfg.r, lora_alpha=cfg.lora_a, target_modules=cfg.target_modules,
-                            lora_dropout=cfg.dropout, bias='none')
+        config = LoraConfig(r=cfg.r, lora_alpha=cfg.lora_a, target_modules=list(cfg.target_modules),
+                            lora_dropout=cfg.dropout, bias='none', task_type='CASUAL_LM')
     elif method_name == 'adalora':
         config = AdaLoraConfig(r=cfg.r, lora_alpha=cfg.lora_a, target_modules=cfg.target_modules,
                                lora_dropout=cfg.dropout)
@@ -65,13 +68,18 @@ def set_training_config(cfg, root_dir):
     checkpoint_name = cfg.checkpoint_name
     out_dir = os.path.join(root_dir, checkpoint_name)
     Path(out_dir).mkdir(parents=True, exist_ok=True)
+    out_dir = str(out_dir)
 
     training_args = TrainingArguments(
         output_dir=out_dir,
         num_train_epochs=cfg.num_epochs,
         per_device_train_batch_size=cfg.batch_size,
+        per_device_eval_batch_size=cfg.batch_size,
         learning_rate=cfg.learning_rate,
-        eval_strategy='epoch'
+        eval_strategy='epoch',
+        gradient_accumulation_steps=1,
+        logging_steps=5000,
+        save_steps=5000
     )
 
     return training_args
@@ -90,7 +98,7 @@ def train(cfg):
 
     # set up quantization config
     device_map = {"": 0}
-    bnb_config = config_quantization(cfg.finetune)
+    bnb_config = config_quantization(cfg.model)
 
     with open(os.path.join(root_dir, cfg.model.huggingface_token_filepath)) as f:
         auth_token = f.readline().rstrip()
@@ -159,7 +167,8 @@ def train(cfg):
         eval_dataset=tokenized_val_ds,
         tokenizer=tokenizer,
         data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
-        compute_metrics=compute_metrics
+        compute_metrics=compute_metrics,
+        # dataset_text_field='text'
     )
     trainer.train()
     print("=" * 80)

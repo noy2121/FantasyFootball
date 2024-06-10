@@ -13,7 +13,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer
 from transformers import BitsAndBytesConfig, TrainingArguments, DataCollatorForLanguageModeling
 from trl import SFTTrainer
 from pathlib import Path
-from peft import LoraConfig, PrefixTuningConfig, AdaLoraConfig, LoKrConfig, get_peft_model
+from peft import LoraConfig, PromptEncoderConfig, AdaLoraConfig, LoKrConfig, get_peft_model, TaskType
 
 from src.finetune.evaluator import compute_metrics
 from src.utils.utils import set_random_seed, get_root_dir
@@ -53,13 +53,13 @@ def set_peft_config(cfg):
         config = LoraConfig(r=cfg.r, lora_alpha=cfg.lora_a, target_modules=list(cfg.target_modules),
                             lora_dropout=cfg.dropout, bias='none', task_type='CASUAL_LM')
     elif method_name == 'adalora':
-        config = AdaLoraConfig(r=cfg.r, lora_alpha=cfg.lora_a, target_modules=cfg.target_modules,
-                               lora_dropout=cfg.dropout)
+        config = AdaLoraConfig(r=cfg.r, lora_alpha=cfg.lora_a, target_modules=list(cfg.target_modules),
+                               lora_dropout=cfg.dropout, bias='none', task_type='CASUAL_LM')
     elif method_name == 'lokr':
-        config = LoKrConfig(r=cfg.r, lora_alpha=cfg.lora_a, target_modules=cfg.target_modules)
+        config = LoKrConfig(r=8, alpha=32, target_modules=list(cfg.target_modules), rank_dropout=0.0,
+                            module_dropout=0.0, init_weights=True, task_type='CASUAL_LM')
     else:
-        config = PrefixTuningConfig(num_virtual_tokens=20, token_dim=768, num_transformer_submodules=1,
-                                    num_attention_heads=12, num_layers=12, encoder_hidden_size=768)
+        config = PromptEncoderConfig(task_type=TaskType.CAUSAL_LM, num_virtual_tokens=20, encoder_hidden_size=128)
 
     return config
 
@@ -74,12 +74,13 @@ def set_training_config(cfg, root_dir):
         output_dir=out_dir,
         num_train_epochs=cfg.num_epochs,
         per_device_train_batch_size=cfg.batch_size,
-        per_device_eval_batch_size=cfg.batch_size,
+        # per_device_eval_batch_size=cfg.batch_size,
         learning_rate=cfg.learning_rate,
-        eval_strategy='epoch',
+        # eval_strategy='epoch',
         gradient_accumulation_steps=1,
         logging_steps=5000,
-        save_steps=5000
+        save_steps=5000,
+        group_by_length=True
     )
 
     return training_args
@@ -173,8 +174,12 @@ def train(cfg):
     trainer.train()
     print("=" * 80)
 
-    print('save fine-tuned finetune')
-    trainer.model.save_pretrained(f'{base_model_name}-football-{cfg.peft.method_name}-ft')
+    # save finetune model in the folder
+    print('save fine-tuned model')
+    out_dir = os.path.join(root_dir, 'results/ft_models')
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    out_dir = str(out_dir)
+    trainer.save_model(output_dir=f'{out_dir}/{base_model_name}-football-{cfg.peft.method}-ft')
 
 
 if __name__ == '__main__':

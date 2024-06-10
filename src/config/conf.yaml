@@ -13,14 +13,14 @@ model:
   huggingface_token_filepath: 'data/keys/huggingface_token.txt'
 
 peft:
-  method: 'lora'
+  method: 'p-tuning'
   r: 64
   lora_a: 16
   target_modules: ['query_key_value']
   dropout: 0.1
 
 train:
-  num_epochs: 3
+  num_epochs: 1
   batch_size: 4
   gradient_accumulation_steps: 1
   optim: 'paged_adamw_32bit'
@@ -29,3 +29,7 @@ train:
   learning_rate: 2e-4
   weight_decay: 0.001
   checkpoint_name: 'results'
+
+evaluate:
+  models_dir: 'results/ft_models/bigscience'
+  out_dir: 'evaluations'

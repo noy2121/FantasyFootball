@@ -7,6 +7,7 @@ import evaluate
 
 from pathlib import Path
 from datasets import load_dataset
+from peft import PeftModel
 from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer
 from transformers import BitsAndBytesConfig, TrainingArguments, DataCollatorForLanguageModeling
 
@@ -35,10 +36,9 @@ def load_ft_models(models_dir, base_model_name, bnb_config, device_map, cache_di
     tokenizers_dict[base_model_name] = tokenizer
 
     for model_name in os.listdir(models_dir):
-        model = AutoModelForCausalLM.from_pretrained(model_name,
-                                                     quantization_config=bnb_config,
-                                                     device_map=device_map)
-        model.config.pretraining_tp = 1
+        # load using peft
+        model = PeftModel.from_pretrained(foundation_model, f'{models_dir}/model_name')
+        model = model.merge_and_unload()
         models_dict[model_name] = model
 
         # load tokenizer
@@ -48,6 +48,21 @@ def load_ft_models(models_dir, base_model_name, bnb_config, device_map, cache_di
         tokenizers_dict[model_name] = tokenizer
 
     return models_dict, tokenizers_dict
+
+
+def generate_sample(model, tokenizer, model_name):
+    input = tokenizer("Cristiano Ronaldo is a ", return_tensors="pt")
+
+    outputs = model.generate(
+        input_ids=input["input_ids"],
+        attention_mask=input["attention_mask"],
+        max_new_tokens=30,
+        eos_token_id=tokenizer.eos_token_id
+    )
+
+    print(f'generate sample from model: {model_name}')
+    print(tokenizer.batch_decode(outputs, skip_special_tokens=True))
+    print('\n')
 
 
 def evaluate_model(model, tokenized_val_ds, tokenizer, out_dir):
@@ -92,9 +107,9 @@ def compare(cfg):
     models_dict, tokenizers_dict = load_ft_models(models_dir, base_model_name, bnb_config, device_map, cache_dir,
                                                   auth_token)
 
-
-    # TODO: give example for every model
-
+    # generate samples for every model
+    for model_name, model in models_dict.items():
+        generate_sample(model, tokenizers_dict[model_name], model_name)
 
     # load datasets
     data_location = os.path.join(root_dir, cfg.data.data_files_path)

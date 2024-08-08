@@ -1,6 +1,6 @@
 data:
   bucket: 'deep-learning-projects'
-  datasets: ['players', 'games']
+  datasets: null
   data_files_path: 'data'
 
 model:

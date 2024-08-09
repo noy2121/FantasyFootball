@@ -12,9 +12,7 @@ players = [
     "total_yellow_cards",
     "red_cards_per_year",
     "total_red_cards",
-    "xg_per_year",
-    "total_xg",
-    "appearances",
+    "lineups",
     "price"
 ]
 

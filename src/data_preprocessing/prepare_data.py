@@ -62,6 +62,7 @@ def create_players_df(dfs, club_ids):
     for colname in ['goals, assists, red_cards, yellow_cards']:
         results.append(get_player_stats(app_df, colname))
 
+
 def preprocess_data():
 
     data_dir = os.path.join(ROOT_DIR, 'data/csvs')

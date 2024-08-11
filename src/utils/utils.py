@@ -1,5 +1,6 @@
 import os
 import logging
+from typing import List
 logger = logging.getLogger(__name__)
 
 import random
@@ -40,3 +41,12 @@ def load_datasets(filenames=None):
         print(f'\t- {k}: shape {v.shape}')
 
     return dfs
+
+
+def save_dataframe(df: pd.DataFrame, filepath: str):
+    df.to_csv(filepath, index=False)
+
+
+def save_dataframes(dfs: List[pd.DataFrame], filepaths: List[str]):
+    for df, fp in zip(dfs, filepaths):
+        save_dataframe(df, fp)

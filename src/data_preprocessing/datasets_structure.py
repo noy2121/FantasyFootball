@@ -2,8 +2,9 @@
 players = [
     "player_id",
     "player_name",
-    "position",
     "club_id",
+    "position",
+    "date_of_birth",
     "goals_per_year",
     "total_goals",
     "assists_per_year",

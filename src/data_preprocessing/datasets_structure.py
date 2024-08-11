@@ -26,9 +26,9 @@ clubs_cols = [
     "num_champions_league_titles"
 ]
 
-matches_cols = [
+games_cols = [
     "game_id",
-    "competition",
+    "competition_type",
     "date",
     "home_club_id",
     "away_club_id",
@@ -41,16 +41,17 @@ matches_cols = [
 
 events_cols = [
     "event_id",
-    "event_type",  # goal, assist, yellow-card, red-card, substitute
+    "event_type",  # goal, assist, yellow-card, red-card, second-yellow-card, substitute
     "game_id",
     "club_id",
+    "date",
     "minute",
     "player_id",   # the player that cause the event. in case of substitute it's the player_id of the player getting out
     "player_in_id",
     "player_assist_id"
 ]
 
-teams = [
+teams = {
     "Manchester City",
     "Liverpool",
     "Manchester United",
@@ -83,7 +84,7 @@ teams = [
     "Shakhtar Donetsk",
     "Dynamo Kyiv",
     "Celtic"
-]
+}
 
 prev_champions_league_vals = ["Winners", "R2", "R4", "R8", "R16", "R32", "Not Qualified"]
 

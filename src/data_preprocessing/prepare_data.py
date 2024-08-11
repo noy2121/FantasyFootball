@@ -1,57 +1,68 @@
 import os
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from pathlib import Path
+from functools import reduce
+from typing import List, Dict
+
+# import sys
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
 from unidecode import unidecode
-from pathlib import Path
-from functools import reduce
-from datasets_structure import teams, players, clubs, events, matches
-from utils.utils import get_root_dir, set_random_seed
+
+from datasets_structure import teams, events_cols, matches_cols
+from src.utils.utils import get_root_dir, set_random_seed
+
 ROOT_DIR = get_root_dir()
 
 
-def get_relevant_club_ids(df):
-    df = df.loc[df['name'].isin(teams)]
+def get_relevant_club_ids(df: pd.DataFrame) -> List[int]:
+    """
+    Retrieve relevant club IDs based on the club names matching the predefined teams list.
+    """
+    assert df['club_name'].tolist() == teams
+    return df['club_id'].tolist()
 
-    return df['club_id']
 
-
-def filter_data_by_year(df, year):
+def filter_data_by_year(df: pd.DataFrame, year: int) -> pd.DataFrame:
+    """
+    Filter DataFrame by a given season year, considering the season starts in August.
+    """
     query = df['date'] >= f'{year}-08-01'
-    df.query("@query", inplace=True)
-
-    return df
+    return df.query("@query")
 
 
-def filter_data_by_club_id(df, colname, club_ids):
-    df = df.loc[df[colname].isin(club_ids)]
-
-    return df
+def filter_data_by_club_id(df: pd.DataFrame, colname: str, club_ids: List[int]) -> pd.DataFrame:
+    """
+    Filter DataFrame by club IDs.
+    """
+    return df[df[colname].isin(club_ids)]
 
 
 def fix_name_format(df: pd.DataFrame, colname: str) -> pd.DataFrame:
+    """
+    Standardize the name format by removing accents and special characters.
+    """
     df[colname] = df[colname].apply(unidecode)
-
     return df
 
 
-def get_player_stats(df, colname):
+def get_player_stats(df: pd.DataFrame, colname: str) -> pd.DataFrame:
+    """
+    Aggregate player statistics over different periods.
+    """
     stats_df = df.groupby(['player_id', 'period'])[colname].sum().reset_index(name=colname)
     stats_per_year_df = stats_df.pivot(index='player_id', columns='period', values=colname).fillna(0)
     total_stats = stats_per_year_df.sum(axis=1)
 
     # Create the final DataFrame
-    result = pd.DataFrame({
+    return pd.DataFrame({
         'player_id': stats_per_year_df.index,
         f'{colname}_per_year': stats_per_year_df.values.tolist(),
         f'total_{colname}': total_stats
     })
 
-    return result
 
-
-def merge_player_stats(players_df, stat_dfs) -> pd.DataFrame:
+def merge_player_stats(players_df: pd.DataFrame, stat_dfs: List[pd.DataFrame]) -> pd.DataFrame:
     """
     Merges player statistics from multiple dataframes into a single comprehensive dataframe.
 
@@ -71,8 +82,7 @@ def merge_player_stats(players_df, stat_dfs) -> pd.DataFrame:
         raise ValueError(f"main_df must have all of these columns: {main_cols}")
 
     # Select only the required columns from main_df
-    query = players_df['last_season'] >= 2023
-    players_df.query("@query", inplace=True)
+    players_df.query("last_season >= 2023", inplace=True)
     main_df_subset = players_df[main_cols]
 
     # Check if all stat_dfs have 'player_id' column
@@ -94,9 +104,9 @@ def merge_player_stats(players_df, stat_dfs) -> pd.DataFrame:
     return merged_df
 
 
-def get_lineups(lineups_df, players_df, year) -> pd.DataFrame:
+def get_lineups(lineups_df: pd.DataFrame, players_df: pd.DataFrame, year: int) -> pd.DataFrame:
     """
-    collect players lineup data and merge it with player stats df.
+    Collect players lineup data and merge it with player stats df.
     Parameters
     ----------
     lineups_df (pd.DataFrame): DataFrame with columns including ["date", "club_id", "player_id", "type"]
@@ -110,22 +120,22 @@ def get_lineups(lineups_df, players_df, year) -> pd.DataFrame:
     lineups_df = filter_data_by_year(lineups_df, year)
     lineups_sum_df = pd.get_dummies(lineups_df['type']).groupby(lineups_df['player_id']).sum().reset_index()
 
-    merged_df = pd.merge(players_df, lineups_sum_df, on='player_id', how='left')
-    return merged_df
+    return pd.merge(players_df, lineups_sum_df, on='player_id', how='left')
 
 
-def create_players_df(dfs, club_ids, s_year):
-    print('create players dataframe')
+def create_players_df(dfs: Dict[str, pd.DataFrame], club_ids: List[int], start_year: int, out_dir: str):
+    """
+    Create and save a comprehensive players DataFrame.
+    """
+    print('Create players dataframe...')
 
-    app_df = dfs['appearances']
-    app_df = filter_data_by_year(app_df, s_year)
+    app_df = filter_data_by_year(dfs['appearances'], start_year)
     app_df = filter_data_by_club_id(app_df, 'player_current_club_id', club_ids)
     app_df['date'] = pd.to_datetime(app_df['date'])
-    bins = [pd.Timestamp(f'{s_year + i}-08-01') for i in range(6)]
-    labels = [f'{(s_year + i) % 100}/{(s_year + i + 1)%100}' for i in range(5)]
-    app_df['period'] = pd.cut(app_df['date'],
-                              bins=bins,
-                              labels=labels)
+
+    bins = [pd.Timestamp(f'{start_year + i}-08-01') for i in range(6)]
+    labels = [f'{(start_year + i) % 100}/{(start_year + i + 1) % 100}' for i in range(5)]
+    app_df['period'] = pd.cut(app_df['date'], bins=bins, labels=labels)
 
     stats_dfs = []
     for colname in ['goals', 'assists', 'red_cards', 'yellow_cards']:
@@ -134,26 +144,33 @@ def create_players_df(dfs, club_ids, s_year):
         stats_dfs.append(curr)
 
     players_df = merge_player_stats(dfs['players'], stats_dfs)
-    players_df = get_lineups(dfs['game_lineups'], players_df, s_year)
+    players_df = get_lineups(dfs['game_lineups'], players_df, start_year)
     players_df = fix_name_format(players_df, 'player_name')
 
-    out_dir = os.path.join(ROOT_DIR, 'data/csvs')
-    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    print("Save players DataFrame...")
     players_df.to_csv(f'{out_dir}/players_df.csv', index=False)
 
 
 def preprocess_data():
 
+    # TODO: define config file
     data_dir = os.path.join(ROOT_DIR, 'data/raw_csvs')
     dataframes = {}
     for filename in os.listdir(data_dir):
+        if filename == 'clubs.csv':
+            continue
         if filename.endswith('.csv'):
             filepath = os.path.join(data_dir, filename)
             dataframes[filename[:-4]] = pd.read_csv(filepath)
 
-    rel_club_ids = get_relevant_club_ids(dataframes["clubs"])
+    dataframes['clubs'] = pd.read_csv(cfg.clubs_df_filepath)
+    relevant_club_ids = get_relevant_club_ids(dataframes['clubs'])
+
     starting_year = 2019
-    create_players_df(dataframes, rel_club_ids, starting_year)
+    out_dir = os.path.join(ROOT_DIR, 'data/csvs')
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    create_players_df(dataframes, relevant_club_ids, starting_year, out_dir)
 
 
 if __name__ == '__main__':

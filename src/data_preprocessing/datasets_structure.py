@@ -1,5 +1,5 @@
 
-players = [
+players_cols = [
     "player_id",
     "player_name",
     "club_id",
@@ -17,29 +17,32 @@ players = [
     "price"
 ]
 
-clubs = [
+clubs_cols = [
     "club_id",
     "club_name",
-    "lineup",
-    "domestic_league_place",
-    "champions_league_place",
-    "rating",
-    "champions_league_title"
+    "champions_league_rank",
+    "prev_season_domestic_league_place",
+    "prev_season_champions_league_place",
+    "num_champions_league_titles"
 ]
 
-matches = [
-    "match_id",
+matches_cols = [
+    "game_id",
     "competition",
     "date",
-    "home_team",
-    "away_team",
-    "score"
+    "home_club_id",
+    "away_club_id",
+    "home_club_goals",
+    "away_club_goals",
+    "home_club_formation",
+    "away_club_formation",
+    "aggregate"
 ]
 
-events = [
+events_cols = [
     "event_id",
     "event_type",  # goal, assist, yellow-card, red-card, substitute
-    "match_id",
+    "game_id",
     "club_id",
     "minute",
     "player_id",   # the player that cause the event. in case of substitute it's the player_id of the player getting out
@@ -50,34 +53,38 @@ events = [
 teams = [
     "Manchester City",
     "Liverpool",
-    "Chelsea",
-    "Tottenham Hotspur",
-    "Arsenal",
     "Manchester United",
+    "Aston Villa",
+    "Arsenal",
+    "Bologna FC 1909",
     "Bayern Munich",
     "Borussia Dortmund",
     "RB Leipzig",
     "Bayer Leverkusen",
     "Paris Saint-Germain",
-    "Marseille",
-    "Lyon",
+    "AS Monaco",
+    "Stade Brestois 29",
     "Lille",
     "Juventus",
     "AC Milan",
     "Inter Milan",
     "Napoli",
+    "Atalanta",
+    "Girona FC",
     "Real Madrid",
     "Barcelona",
     "Atletico Madrid",
-    "Sevilla",
-    "Porto",
+    "Sporting CP",
     "Benfica",
-    "Ajax",
+    "Feyenoord Rotterdam",
     "PSV Eindhoven",
     "Club Brugge",
-    "Anderlecht",
+    "VfB Stuttgart",
     "Shakhtar Donetsk",
     "Dynamo Kyiv",
-    "Atalanta",
     "Celtic"
 ]
+
+prev_champions_league_vals = ["Winners", "R2", "R4", "R8", "R16", "R32", "Not Qualified"]
+
+competition_vals = ["domestic_league", "champions_league", "other"]

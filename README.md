@@ -1,2 +1,2 @@
 # FootballGPT
-small scale llm, fine-tuned on football data.
+small-scale LLM, fine-tuned on football data to create good fantasy football team.

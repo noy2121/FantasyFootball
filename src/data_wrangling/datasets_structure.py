@@ -13,6 +13,8 @@ players_cols = [
     "total_yellow_cards",
     "red_cards_per_year",
     "total_red_cards",
+    "clean_sheets_per_year",
+    "total_clean_sheets",
     "lineups",
     "price"
 ]

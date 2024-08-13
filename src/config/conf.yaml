@@ -1,7 +1,10 @@
 data:
   bucket: 'deep-learning-projects'
   datasets: null
-  data_files_path: 'data'
+  raw_csvs_path: 'data/raw_csvs'
+  csvs_path: 'data/csvs'
+  preprocessed_data_path: 'data/preprocessed'
+  start_year: 2019
 
 model:
   model_name: 'bigscience/bloomz-560m'   # mistralai/Mistral-7B-Instruct-v0.2, mistralai/Mistral-7B-v0.1,

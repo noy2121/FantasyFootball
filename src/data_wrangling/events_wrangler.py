@@ -1,5 +1,6 @@
 import pandas as pd
-
+from typing import Dict
+from wrangler_utils import get_club_name_by_club_id
 from datasets_structure import events_cols
 
 
@@ -50,4 +51,49 @@ def create_events_df(raw_events_df: pd.DataFrame, games_df: pd.DataFrame, start_
     return events_df
 
 
+def format_line(col, val, dfs):
+    def handle_game_id():
+        home_id, away_id = dfs['games'].loc[dfs['games']['game_id'] == val, ['home_club_id', 'away_club_id']].iloc[0]
+        home_name = get_club_name_by_club_id(home_id)
+        away_name = get_club_name_by_club_id(away_id)
+        return "match", f"{home_name} vs {away_name}"
 
+    def handle_club_id():
+        return "club_name", get_club_name_by_club_id(val)
+
+    def handle_player_id():
+        return "player_name", dfs['players'].loc[dfs['players']['player_id'] == val, 'player_name'].iloc[0]
+
+    def handle_player_in_id():
+        if pd.isna(val):
+            return None, None
+        return "player_in_name", dfs['players'].loc[dfs['players']['player_id'] == val, 'player_name'].iloc[0]
+
+    def handle_player_assist_id():
+        if pd.isna(val):
+            return None, None
+        return "assist_player_name", dfs['players'].loc[dfs['players']['player_id'] == val, 'player_name'].iloc[0]
+
+    handlers = {
+        'game_id': handle_game_id,
+        'club_id': handle_club_id,
+        'player_id': handle_player_id,
+        'player_in_id': handle_player_in_id,
+        'player_assist_id': handle_player_assist_id
+    }
+
+    handler = handlers.get(col)
+    if handler:
+        new_col, new_val = handler()
+        if new_col is None and new_val is None:
+            return ''
+        return f"{new_col}: {new_val}"
+    return f"{col}: {val}"
+
+
+def create_text_events_df(dfs: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+
+    def format_row(row):
+        return ', '.join(f"{format_line(col, val, dfs)}" for col, val in row.items() if col != 'event_id')
+
+    return pd.DataFrame({'text': dfs['event'].apply(format_row, axis=1)})

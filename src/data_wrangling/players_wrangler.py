@@ -4,7 +4,7 @@ from typing import Dict, List, Set
 import pandas as pd
 from unidecode import unidecode
 
-from wrangler_utils import filter_data_by_year, filter_data_by_club_id, add_period_to_df
+from wrangler_utils import filter_data_by_year, filter_data_by_club_id, add_period_to_df, get_club_name_by_club_id
 
 
 def fix_name_format(df: pd.DataFrame, colname: str) -> pd.DataFrame:
@@ -64,7 +64,7 @@ def merge_player_stats(players_df: pd.DataFrame, stat_dfs: List[pd.DataFrame]) -
 
     # Fill NaN values with appropriate defaults
     for col in merged_df.columns:
-        if col.endswith('_per_year'):
+        if col.endswith('in_last_three_seasons'):
             merged_df[col] = merged_df[col].apply(lambda x: x if isinstance(x, list) else [0, 0, 0])
         elif col.startswith('total_'):
             merged_df[col] = merged_df[col].fillna(0)
@@ -89,7 +89,10 @@ def get_lineups(lineups_df: pd.DataFrame, players_df: pd.DataFrame, year: int) -
     lineups_df = filter_data_by_year(lineups_df, year)
     lineups_sum_df = pd.get_dummies(lineups_df['type']).groupby(lineups_df['player_id']).sum().reset_index()
 
-    return pd.merge(players_df, lineups_sum_df, on='player_id', how='left')
+    df = pd.merge(players_df, lineups_sum_df, on='player_id', how='left')
+    df.rename(columns={'substitutes': 'substitute'}, inplace=True)
+
+    return df
 
 
 def create_players_df(dfs: Dict[str, pd.DataFrame], club_ids: Set[int], start_year: int, curr_year: int) -> pd.DataFrame:
@@ -114,3 +117,26 @@ def create_players_df(dfs: Dict[str, pd.DataFrame], club_ids: Set[int], start_ye
     players_df = fix_name_format(players_df, 'player_name')
 
     return players_df
+
+
+def create_text_players_df(df: pd.DataFrame) -> pd.DataFrame:
+    def format_value(val):
+        if isinstance(val, list):
+            return str(val) if val else ''
+        elif pd.isna(val):
+            return ''
+        else:
+            return val
+
+    def format_line(col, val):
+        if col == 'club_id':
+            val = get_club_name_by_club_id(val)
+            col = 'club_name'
+        else:
+            val = format_value(val)
+        return f'{col}: {val}'
+
+    def format_row(row):
+        return ', '.join(f"{format_line(col, val)}" for col, val in row.items() if col != 'player_id')
+
+    return pd.DataFrame({'text': df.apply(format_row, axis=1)})

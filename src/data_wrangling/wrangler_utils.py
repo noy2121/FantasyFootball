@@ -1,9 +1,16 @@
+import os
+import json
 from typing import List, Set
 
 import numpy as np
 import pandas as pd
 
 from datasets_structure import teams
+from src.utils.utils import ROOT_DIR
+
+
+with open(os.path.join(ROOT_DIR, 'data/club_id_name_mapping.json'), 'r') as f:
+    CLUB_IDS_DICT = json.load(f)
 
 
 def get_relevant_club_ids(df: pd.DataFrame) -> Set[int]:
@@ -12,6 +19,10 @@ def get_relevant_club_ids(df: pd.DataFrame) -> Set[int]:
     """
     assert set(df['club_name']) == teams, f'Clubs in the DataFrame are different in {teams} !'
     return set(df['club_id'])
+
+
+def get_club_name_by_club_id(idx: int) -> str:
+    return CLUB_IDS_DICT[str(idx)]
 
 
 def filter_data_by_year(df: pd.DataFrame, year: int) -> pd.DataFrame:
@@ -46,3 +57,5 @@ def add_period_to_df(df: pd.DataFrame, start: int, end: int) -> pd.DataFrame:
     df['period'] = pd.cut(df['date'], bins=bins, labels=labels)
 
     return df
+
+

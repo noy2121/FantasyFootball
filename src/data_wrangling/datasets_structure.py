@@ -5,17 +5,18 @@ players_cols = [
     "club_id",
     "position",
     "date_of_birth",
-    "goals_per_year",
+    "goals_in_last_three_seasons",
     "total_goals",
-    "assists_per_year",
+    "assists_in_last_three_seasons",
     "total_assists",
-    "yellow_cards_per_year",
+    "yellow_cards_in_last_three_seasons",
     "total_yellow_cards",
-    "red_cards_per_year",
+    "red_cards_in_last_three_seasons",
     "total_red_cards",
-    "clean_sheets_per_year",
+    "clean_sheets_in_last_three_seasons",
     "total_clean_sheets",
-    "lineups",
+    "starting_lineups",
+    "substitute",
     "price"
 ]
 
@@ -43,12 +44,12 @@ games_cols = [
 
 events_cols = [
     "event_id",
-    "event_type",  # goal, assist, yellow-card, red-card, second-yellow-card, substitute
+    "event_type",
     "game_id",
     "club_id",
     "date",
     "minute",
-    "player_id",   # the player that cause the event. in case of substitute it's the player_id of the player getting out
+    "player_id",
     "player_in_id",
     "player_assist_id"
 ]
@@ -88,6 +89,24 @@ teams = {
     "Celtic"
 }
 
-prev_champions_league_vals = ["Winners", "R2", "R4", "R8", "R16", "R32", "Not Qualified"]
+text_players_cols = ["player_name",
+                     "club_name",
+                     "position",
+                     "date_of_birth",
+                     "goals_in_last_three_seasons",
+                     "total_goals",
+                     "assists_in_last_three_seasons",
+                     "total_assists",
+                     "yellow_cards_in_last_three_seasons",
+                     "total_yellow_cards",
+                     "red_cards_in_last_three_seasons",
+                     "total_red_cards",
+                     "clean_sheets_in_last_three_seasons",
+                     "total_clean_sheets",
+                     "lineups",
+                     "price"
+                     ]
+
+prev_champions_league_vals = ["Winners", "Second", "Semi-Finals", "Quarter-Finals", "Last-16", "Group-Stage", "Not Qualified"]
 
 competition_vals = ["domestic_league", "champions_league", "other"]

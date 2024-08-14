@@ -38,6 +38,21 @@ def save_dataframe(df: pd.DataFrame, filepath: str):
 
 
 def save_dataframes(dfs: Dict[str, pd.DataFrame], out_dir: str):
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
     for name, df in dfs.items():
         filepath = f'{out_dir}/{name}.csv'
         save_dataframe(df, filepath)
+
+
+def load_dataframes(data_dir: str, filenames: List[str] = None) -> Dict[str, pd.DataFrame]:
+    if filenames is None:  # load all datasets
+        dfs = {str(Path(fn).stem): pd.read_csv(f'{data_dir}/{fn}') for fn in
+               os.listdir(data_dir) if Path(fn).suffix == '.csv'}
+    else:
+        dfs = {str(Path(fn).stem): pd.read_csv(f'{data_dir}/{fn}') for fn in filenames
+               if Path(f'{data_dir}/{fn}').exists() and Path(fn).suffix == '.csv'}
+    print(f'Load {len(dfs)} different datasets:')
+    for k, v in dfs.items():
+        print(f'\t- {k}: shape {v.shape}')
+
+    return dfs

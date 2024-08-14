@@ -11,7 +11,7 @@ from players_wrangler import create_players_df, create_text_players_df
 from games_wrangler import create_games_df, create_text_games_df, create_text_clubs_df
 from events_wrangler import create_events_df, create_text_events_df
 from wrangler_utils import get_relevant_club_ids
-from src.utils.utils import ROOT_DIR, set_random_seed, save_dataframes
+from src.utils.utils import ROOT_DIR, set_random_seed, save_dataframes, load_dataframes
 
 
 def prepare_dataframes(raw_dfs: Dict[str, pd.DataFrame], club_ids: Set[int], start_year: int,
@@ -26,15 +26,30 @@ def prepare_dataframes(raw_dfs: Dict[str, pd.DataFrame], club_ids: Set[int], sta
     return {'players': players_df, 'clubs': clubs_df, 'games': games_df, 'events': events_df}
 
 
+def split_players_df(df: pd.DataFrame, test_year: int, name: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+
+    if name == 'players':
+        base_columns = ['player_id', 'player_name', 'club_id', 'position', 'date_of_birth']
+    elif name == 'clubs':
+        base_columns = ['club_id', 'club_name', 'number_of_champions_league_titles']
+    else:
+        raise ValueError(f'Value of name must be in ["player", "clubs"]. Got {name=} instead!')
+
+    test_mask = df.columns.str.contains(str(test_year), case=False)
+    train_df = df[list(df.columns[~test_mask])]
+    test_df = df[base_columns + list(df.columns[test_mask])]
+
+    return train_df, test_df
+
+
 def split_df(df: pd.DataFrame, test_year: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
 
     # Create masks for train, validation, and test sets
     test_date = f'{test_year}-08-01'
-    train_mask = df['date'] < test_date
     test_mask = df['date'] >= test_date
 
     # Split the dataframe
-    train_df = df[train_mask]
+    train_df = df[~test_mask]
     test_df = df[test_mask]
 
     return train_df, test_df
@@ -42,18 +57,21 @@ def split_df(df: pd.DataFrame, test_year: int) -> Tuple[pd.DataFrame, pd.DataFra
 
 def train_test_split(dfs: Dict[str, pd.DataFrame], test_year: int) -> Dict[str, Dict[str, pd.DataFrame]]:
 
-    players_train, players_test = split_df(dfs['players'], test_year)
+    players_train, players_test = split_players_df(dfs['players'], test_year, 'players')
+    clubs_train, clubs_test = split_players_df(dfs['clubs'], test_year, 'clubs')
     games_train, games_test = split_df(dfs['games'], test_year)
     events_train, events_test = split_df(dfs['events'], test_year)
 
     return {
         'train': {
             'players': players_train,
+            'clubs': clubs_train,
             'games': games_train,
             'events': events_train
         },
         'test': {
             'players': players_test,
+            'clubs': clubs_test,
             'games': games_test,
             'events': events_test
         }
@@ -98,19 +116,20 @@ def wrangler(cfg):
 
     # TODO: save train/val/test in different folders
     if cfg.data.split_data:
-        dataframes = load_dataframes()
-        train_test_dfs = train_test_split(dataframes, val_year, test_year)
-        print("Save train/val/test DataFrames...")
+        dataframes = load_dataframes(f'{data_dir}/csvs')
+        train_test_dfs = train_test_split(dataframes, test_year)
+        print("Save train/test DataFrames...")
         for key, dfs in train_test_dfs.items():
             out_dir = f'{data_dir}/preprocessed/{key}/csvs'
             save_dataframes(dfs, out_dir)
 
     if cfg.data.create_text_data:
-        dataframes = load_dataframes()
-        dataframes = convert_dfs_to_text(dataframes)
-        print("Save text DataFrames...")
-        out_dir = f'{data_dir}/preprocessed/'
-        save_dataframes(dataframes, f'{out_dir}/csvs')
+        for key in ['train', 'test']:
+            dataframes = load_dataframes(f'{data_dir}/preprocessed/{key}/csvs')
+            dataframes = convert_dfs_to_text(dataframes)
+            print(f"Save {key} Text-DataFrames...")
+            out_dir = f'{data_dir}/preprocessed/{key}/text_data'
+            save_dataframes(dataframes, out_dir)
 
 
 if __name__ == '__main__':

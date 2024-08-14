@@ -48,8 +48,6 @@ def create_text_games_df(df: pd.DataFrame) -> pd.DataFrame:
             val = get_club_name_by_club_id(val)
             col = f'{col.split("_")[0]}_club_name'
             return f'{col}: {val}'
-        elif col == 'date':
-            return f'{col}: {val.date()}'
         else:
             return f'{col}: {val}'
 

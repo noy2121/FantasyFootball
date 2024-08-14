@@ -83,11 +83,7 @@ def format_line(col, val, dfs):
             return None, None
         return "assist_player_name", safe_get(dfs['players'], dfs['players']['player_id'] == val, 'player_name')
 
-    def handle_date():
-        return col, val.date()
-
     handlers = {
-        'date': handle_date,
         'game_id': handle_game_id,
         'club_id': handle_club_id,
         'player_id': handle_player_id,

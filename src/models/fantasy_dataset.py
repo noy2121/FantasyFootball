@@ -31,44 +31,32 @@ class WeightedRandomSampler(Sampler):
 
 
 class MultiDataset(Dataset):
-    def __init__(self, data_dir: str, filenames: str, tokenizer, max_length=512):
+    def __init__(self, data_dir: str, tokenizer, filenames: List[str] = None, max_length=512):
 
-        self.dataframes = self.load_datasets(data_dir, filenames)
+        self.dataframes = self.load_dataframes(data_dir, filenames)
 
         self.tokenizer = tokenizer
         self.max_length = max_length
-        self.dataset_keys = list(datasets.keys())
+        self.dataframes_keys = list(self.dataframes.keys())
 
         # Calculate total length and weights
-        self.dataset_lengths = [len(dataset) for dataset in datasets.values()]
-        self.total_length = sum(self.dataset_lengths)
-        self.weights = [length / self.total_length for length in self.dataset_lengths]
+        self.dataframes_sizes = [len(df) for df in self.dataframes.values()]
+        self.total_size = sum(self.dataframes_sizes)
+        self.weights = [size / self.total_size for size in self.dataframes_sizes]
 
-        # Create an index mapping
-        self.index_map = []
-        for key in self.dataset_keys:
-            self.index_map.extend([(key, i) for i in range(len(self.datasets[key]))])
-
-    @staticmethod
-    def load_datasets(data_dir: str, filenames: List[str] = None) -> Dict[str, pd.DataFrame]:
-        if filenames == 'all':  # load all datasets
-            dfs = {str(Path(fn).stem): pd.read_csv(f'{data_dir}/{fn}') for fn in
-                   os.listdir(data_dir) if Path(fn).suffix == '.csv'}
-        else:
-            dfs = {str(Path(fn).stem): pd.read_csv(f'{data_dir}/{fn}') for fn in filenames
-                   if Path(f'{data_dir}/{fn}').exists() and Path(fn).suffix == '.csv'}
-        print(f'Load {len(dfs)} different datasets:')
-        for k, v in dfs.items():
-            print(f'\t- {k}: shape {v.shape}')
-
-        return dfs
+        self.cumulative_sizes = np.cumsum(self.dataframes_sizes)
 
     def __len__(self):
-        return self.total_length
+        return self.total_size
 
     def __getitem__(self, idx):
-        dataset_key, item_idx = self.index_map[idx]
-        text = self.datasets[dataset_key][item_idx]
+        df_idx = np.searchsorted(self.cumulative_sizes, idx, side='right')
+        if df_idx > 0:
+            idx = idx - self.cumulative_sizes[df_idx - 1]
+
+        df_key = self.dataframes_keys[df_idx]
+        df = self.dataframes[df_key]
+        text = df.iloc[idx]['text']
 
         encoding = self.tokenizer.encode_plus(
             text,

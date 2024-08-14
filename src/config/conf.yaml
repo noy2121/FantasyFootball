@@ -1,8 +1,8 @@
 data:
   bucket: 'deep-learning-projects'
   data_dir: 'data'
-  process_raw_data: True
-  create_text_data: False
+  process_raw_data: False
+  create_text_data: True
   split_data: False
   start_year: 2017
   test_year: 2023

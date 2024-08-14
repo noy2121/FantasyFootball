@@ -22,7 +22,7 @@ def get_relevant_club_ids(df: pd.DataFrame) -> Set[int]:
 
 
 def get_club_name_by_club_id(idx: int) -> str:
-    return CLUB_IDS_DICT[str(idx)]
+    return CLUB_IDS_DICT.get(str(idx), 'Unknown')
 
 
 def filter_data_by_year(df: pd.DataFrame, year: int) -> pd.DataFrame:

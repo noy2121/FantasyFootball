@@ -5,3 +5,4 @@
 
 *.idea
 /results/
+/src/data_wrangling/outputs/

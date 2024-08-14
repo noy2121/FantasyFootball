@@ -15,20 +15,17 @@ def fix_name_format(df: pd.DataFrame, colname: str) -> pd.DataFrame:
     return df
 
 
-def get_player_stats(df: pd.DataFrame, colname: str) -> pd.DataFrame:
+def get_player_stats(df: pd.DataFrame, statistic: str, start_year: int) -> pd.DataFrame:
     """
     Aggregate player statistics over different periods.
     """
-    stats_df = df.groupby(['player_id', 'period'])[colname].sum().reset_index(name=colname)
-    stats_per_year_df = stats_df.pivot(index='player_id', columns='period', values=colname).fillna(0)
-    total_stats = stats_per_year_df.sum(axis=1)
+    stats_df = df.groupby(['player_id', 'period'])[statistic].sum().reset_index(name=statistic)
+    stats_per_year_df = stats_df.pivot(index='player_id', columns='period', values=statistic).fillna(0)
 
-    # Create the final DataFrame
-    return pd.DataFrame({
-        'player_id': stats_per_year_df.index,
-        f'{colname}_per_year': stats_per_year_df.values.tolist(),
-        f'total_{colname}': total_stats
-    })
+    result = stats_per_year_df.add_suffix(f'_total_{statistic}')
+    result.reset_index(inplace=True)
+
+    return result
 
 
 def merge_player_stats(players_df: pd.DataFrame, stat_dfs: List[pd.DataFrame]) -> pd.DataFrame:
@@ -64,16 +61,13 @@ def merge_player_stats(players_df: pd.DataFrame, stat_dfs: List[pd.DataFrame]) -
 
     # Fill NaN values with appropriate defaults
     for col in merged_df.columns:
-        if col.endswith('in_last_three_seasons'):
-            merged_df[col] = merged_df[col].apply(lambda x: x if isinstance(x, list) else [0, 0, 0])
-        elif col.startswith('total_'):
-            merged_df[col] = merged_df[col].fillna(0)
+        merged_df[col] = merged_df[col].fillna(0)
 
     merged_df.rename(columns={'name': 'player_name', 'current_club_id': 'club_id'}, inplace=True)
     return merged_df
 
 
-def get_lineups(lineups_df: pd.DataFrame, players_df: pd.DataFrame, year: int) -> pd.DataFrame:
+def get_lineups(lineups_df: pd.DataFrame, players_df: pd.DataFrame, start_year: int, curr_year) -> pd.DataFrame:
     """
     Collect players lineup data and merge it with player stats df.
     Parameters
@@ -86,11 +80,13 @@ def get_lineups(lineups_df: pd.DataFrame, players_df: pd.DataFrame, year: int) -
     pd.DataFrame: A comprehensive DataFrame with specified player information and statistics
     """
 
-    lineups_df = filter_data_by_year(lineups_df, year)
-    lineups_sum_df = pd.get_dummies(lineups_df['type']).groupby(lineups_df['player_id']).sum().reset_index()
+    lineups_df = filter_data_by_year(lineups_df, start_year)
+    lineups_df = add_period_to_df(lineups_df, start_year, curr_year)
+    lineups_sum_df = pd.get_dummies(lineups_df['type']).groupby([lineups_df['player_id'], lineups_df['period']]).sum().reset_index()
+    lineups_sum_df = lineups_sum_df.pivot(index='player_id', columns='period', values='starting_lineup').fillna(0)
 
+    lineups_sum_df = lineups_sum_df.add_suffix(f'_lineups')
     df = pd.merge(players_df, lineups_sum_df, on='player_id', how='left')
-    df.rename(columns={'substitutes': 'substitute'}, inplace=True)
 
     return df
 
@@ -107,13 +103,13 @@ def create_players_df(dfs: Dict[str, pd.DataFrame], club_ids: Set[int], start_ye
     app_df = add_period_to_df(app_df, start_year, curr_year)
 
     stats_dfs = []
-    for colname in ['goals', 'assists', 'red_cards', 'yellow_cards']:
-        curr = get_player_stats(app_df, colname)
+    for colname in ['goals', 'assists', 'yellow_cards', 'red_cards']:
+        curr = get_player_stats(app_df, colname, start_year)
         curr.reset_index(drop=True, inplace=True)
         stats_dfs.append(curr)
 
     players_df = merge_player_stats(dfs['players'], stats_dfs)
-    players_df = get_lineups(dfs['game_lineups'], players_df, start_year)
+    players_df = get_lineups(dfs['game_lineups'], players_df, start_year, curr_year)
     players_df = fix_name_format(players_df, 'player_name')
 
     return players_df

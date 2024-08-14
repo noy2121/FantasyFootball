@@ -5,28 +5,62 @@ players_cols = [
     "club_id",
     "position",
     "date_of_birth",
-    "goals_in_last_three_seasons",
-    "total_goals",
-    "assists_in_last_three_seasons",
-    "total_assists",
-    "yellow_cards_in_last_three_seasons",
-    "total_yellow_cards",
-    "red_cards_in_last_three_seasons",
-    "total_red_cards",
-    "clean_sheets_in_last_three_seasons",
-    "total_clean_sheets",
-    "starting_lineups",
-    "substitute",
+    "2017-18_total_goals",
+    "2018/19_total_goals",
+    "2019/20_total_goals",
+    "2020/21_total_goals",
+    "2021/22_total_goals",
+    "2022/23_total_goals",
+    "2023/24_total_goals",
+    "2017/18_total_assists",
+    "2018/19_total_assists",
+    "2019/20_total_assists",
+    "2020/21_total_assists",
+    "2021/22_total_assists",
+    "2022/23_total_assists",
+    "2023/24_total_assists",
+    "2017/18_total_yellow_cards",
+    "2018/19_total_yellow_cards",
+    "2019/20_total_yellow_cards",
+    "2020/21_total_yellow_cards",
+    "2021/22_total_yellow_cards",
+    "2022/23_total_yellow_cards",
+    "2023/24_total_yellow_cards",
+    "2017/18_total_red_cards",
+    "2018/19_total_red_cards",
+    "2019/20_total_red_cards",
+    "2020/21_total_red_cards",
+    "2021/22_total_red_cards",
+    "2022/23_total_red_cards",
+    "2023/24_total_red_cards",
+    "2017/18_total_clean_sheets",
+    "2018/19_total_clean_sheets",
+    "2019/20_total_clean_sheets",
+    "2020/21_total_clean_sheets",
+    "2021/22_total_clean_sheets",
+    "2022/23_total_clean_sheets",
+    "2023/24_total_clean_sheets",
+    "2017/18_starting_lineup",
+    "2018/19_starting_lineup",
+    "2019/20_starting_lineup",
+    "2020/21_starting_lineup",
+    "2021/22_starting_lineup",
+    "2022/23_starting_lineup",
+    "2023/24_starting_lineup",
     "price"
 ]
 
 clubs_cols = [
     "club_id",
     "club_name",
-    "champions_league_rank",
-    "prev_season_domestic_league_place",
-    "prev_season_champions_league_place",
-    "num_champions_league_titles"
+    "num_champions_league_titles",
+    "2017/18_champions_league_place",
+    "2018/19_champions_league_place",
+    "2019/20_champions_league_place",
+    "2020/21_champions_league_place",
+    "2021/22_champions_league_place",
+    "2022/23_champions_league_place",
+    "2023/24_champions_league_place"
 ]
 
 games_cols = [
@@ -107,6 +141,6 @@ text_players_cols = ["player_name",
                      "price"
                      ]
 
-prev_champions_league_vals = ["Winners", "Second", "Semi-Finals", "Quarter-Finals", "Last-16", "Group-Stage", "Not Qualified"]
+prev_champions_league_vals = ["Winners", "Second", "Semi-Finals", "Quarter-Finals", "Round of 16", "Group Stage", "Not Qualified"]
 
 competition_vals = ["domestic_league", "champions_league", "other"]

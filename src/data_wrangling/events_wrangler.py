@@ -1,5 +1,5 @@
-import pandas as pd
 from typing import Dict
+import pandas as pd
 from wrangler_utils import get_club_name_by_club_id
 from datasets_structure import events_cols
 
@@ -35,7 +35,7 @@ def split_cards_events(events_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def create_events_df(raw_events_df: pd.DataFrame, games_df: pd.DataFrame, start_year: int) -> pd.DataFrame:
-    print('Extract events data...')
+    print('Extract Events data...')
     # filter by game_id
     # no need to filter by year or club_id, games_df has already been filtered this way
     relevant_game_ids = games_df['game_id'].tolist()
@@ -52,8 +52,16 @@ def create_events_df(raw_events_df: pd.DataFrame, games_df: pd.DataFrame, start_
 
 
 def format_line(col, val, dfs):
+    def safe_get(df, cond, column):
+        try:
+            res = df.loc[cond, column].iloc[0]
+            return 'Unknown' if pd.isna(res) else res
+        except (IndexError, KeyError):
+            return 'Unknown'
+
     def handle_game_id():
-        home_id, away_id = dfs['games'].loc[dfs['games']['game_id'] == val, ['home_club_id', 'away_club_id']].iloc[0]
+        home_id = safe_get(dfs['games'], dfs['games']['game_id'] == val, 'home_club_id')
+        away_id = safe_get(dfs['games'], dfs['games']['game_id'] == val, 'away_club_id')
         home_name = get_club_name_by_club_id(home_id)
         away_name = get_club_name_by_club_id(away_id)
         return "match", f"{home_name} vs {away_name}"
@@ -62,19 +70,24 @@ def format_line(col, val, dfs):
         return "club_name", get_club_name_by_club_id(val)
 
     def handle_player_id():
-        return "player_name", dfs['players'].loc[dfs['players']['player_id'] == val, 'player_name'].iloc[0]
+
+        return "player_name", safe_get(dfs['players'], dfs['players']['player_id'] == val, 'player_name')
 
     def handle_player_in_id():
         if pd.isna(val):
             return None, None
-        return "player_in_name", dfs['players'].loc[dfs['players']['player_id'] == val, 'player_name'].iloc[0]
+        return "player_in_name", safe_get(dfs['players'], dfs['players']['player_id'] == val, 'player_name')
 
     def handle_player_assist_id():
         if pd.isna(val):
             return None, None
-        return "assist_player_name", dfs['players'].loc[dfs['players']['player_id'] == val, 'player_name'].iloc[0]
+        return "assist_player_name", safe_get(dfs['players'], dfs['players']['player_id'] == val, 'player_name')
+
+    def handle_date():
+        return col, val.date()
 
     handlers = {
+        'date': handle_date,
         'game_id': handle_game_id,
         'club_id': handle_club_id,
         'player_id': handle_player_id,
@@ -92,8 +105,9 @@ def format_line(col, val, dfs):
 
 
 def create_text_events_df(dfs: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+    print('Convert Events data to text...')
 
     def format_row(row):
         return ', '.join(f"{format_line(col, val, dfs)}" for col, val in row.items() if col != 'event_id')
 
-    return pd.DataFrame({'text': dfs['event'].apply(format_row, axis=1)})
+    return pd.DataFrame({'text': dfs['events'].apply(format_row, axis=1)})

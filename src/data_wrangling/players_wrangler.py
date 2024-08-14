@@ -100,7 +100,7 @@ def create_players_df(dfs: Dict[str, pd.DataFrame], club_ids: Set[int], start_ye
     Create a comprehensive players DataFrame.
     """
     # TODO: add clean sheets calculation
-    print('Extract players data...')
+    print('Extract Players data...')
 
     app_df = filter_data_by_year(dfs['appearances'], start_year)
     app_df = filter_data_by_club_id(app_df, ['player_current_club_id'], club_ids)
@@ -120,6 +120,8 @@ def create_players_df(dfs: Dict[str, pd.DataFrame], club_ids: Set[int], start_ye
 
 
 def create_text_players_df(df: pd.DataFrame) -> pd.DataFrame:
+    print('Convert Players data to text...')
+
     def format_value(val):
         if isinstance(val, list):
             return str(val) if val else ''

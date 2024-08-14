@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Set
 
 import pandas as pd
@@ -20,7 +21,7 @@ def create_games_df(raw_games_df: pd.DataFrame, club_ids: Set[int], start_year: 
     """
     Create a comprehensive games DataFrame.
     """
-    print('Extract games data...')
+    print('Extract Games data...')
 
     games_df = filter_data_by_year(raw_games_df, start_year)
     games_df = filter_data_by_club_id(games_df, ['home_club_id', 'away_club_id'], club_ids)
@@ -31,6 +32,8 @@ def create_games_df(raw_games_df: pd.DataFrame, club_ids: Set[int], start_year: 
 
 
 def create_text_clubs_df(df: pd.DataFrame) -> pd.DataFrame:
+    print('Convert Clubs data to text...')
+
     def format_row(row):
         return ', '.join(f"{col}: {val}" for col, val in row.items() if col != 'club_id')
 
@@ -38,12 +41,17 @@ def create_text_clubs_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def create_text_games_df(df: pd.DataFrame) -> pd.DataFrame:
+    print('Convert Games data to text...')
+
     def format_line(col, val):
         if 'club_id' in col:
             val = get_club_name_by_club_id(val)
             col = f'{col.split("_")[0]}_club_name'
-
-        return f'{col}: {val}'
+            return f'{col}: {val}'
+        elif col == 'date':
+            return f'{col}: {val.date()}'
+        else:
+            return f'{col}: {val}'
 
     def format_row(row):
         return ', '.join(f"{format_line(col, val)}" for col, val in row.items() if col != 'game_id')

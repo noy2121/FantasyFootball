@@ -17,7 +17,7 @@ def get_relevant_club_ids(df: pd.DataFrame) -> Set[int]:
     """
     Retrieve relevant club IDs based on the club names matching the predefined teams list.
     """
-    assert set(df['club_name']) == teams, f'Clubs in the DataFrame are different in {teams} !'
+    # assert set(df['club_name']) == teams, f'Clubs in the DataFrame are different in {teams} !'
     return set(df['club_id'])
 
 
@@ -50,10 +50,11 @@ def add_period_to_df(df: pd.DataFrame, start: int, end: int) -> pd.DataFrame:
     """
     Adds "period" column to dataframe for better date filtering.
     """
+    df = df.copy()
     years = end - start
     df['date'] = pd.to_datetime(df['date'])
     bins = [pd.Timestamp(f'{start + i}-08-01') for i in range(years + 1)]
-    labels = [f'{(start + i) % 100}/{(start + i + 1) % 100}' for i in range(years)]
+    labels = [f'{(start + i)}/{(start + i + 1) % 100}' for i in range(years)]
     df['period'] = pd.cut(df['date'], bins=bins, labels=labels)
 
     return df

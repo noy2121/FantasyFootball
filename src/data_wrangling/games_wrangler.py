@@ -1,7 +1,7 @@
-from datetime import date
 from typing import Set
 
 import pandas as pd
+from unidecode import unidecode
 
 from wrangler_utils import filter_data_by_year, filter_data_by_club_id, add_period_to_df, get_club_name_by_club_id
 from datasets_structure import games_cols
@@ -17,6 +17,27 @@ def clean_formations(games_df: pd.DataFrame) -> pd.DataFrame:
     return games_df
 
 
+def clean_competitions(games_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Clean blanks and irrelevant competitions.
+    """
+    def update_row(row):
+        if row['competition_type'] in ['domestic_league', 'domestic_cup', 'other']:
+            return row['competition_type']
+        elif row['competition_type'] == 'international_cup':
+            if row['competition_id'] == 'EL':
+                return 'europa_league'
+            elif row['competition_id'] == 'CL':
+                return 'champions_league'
+            else:
+                return 'other'
+        else:
+            return 'other'
+
+    games_df['competition_type'] = games_df.apply(update_row, axis=1)
+    return games_df
+
+
 def create_games_df(raw_games_df: pd.DataFrame, club_ids: Set[int], start_year: int, curr_year: int) -> pd.DataFrame:
     """
     Create a comprehensive games DataFrame.
@@ -27,6 +48,7 @@ def create_games_df(raw_games_df: pd.DataFrame, club_ids: Set[int], start_year: 
     games_df = filter_data_by_club_id(games_df, ['home_club_id', 'away_club_id'], club_ids)
     games_df = add_period_to_df(games_df, start_year, curr_year)
     games_df = clean_formations(games_df)
+    games_df = clean_competitions(games_df)
 
     return games_df[games_cols]
 
@@ -35,7 +57,7 @@ def create_text_clubs_df(df: pd.DataFrame) -> pd.DataFrame:
     print('Convert Clubs data to text...')
 
     def format_row(row):
-        return ', '.join(f"{col}: {val}" for col, val in row.items() if col != 'club_id')
+        return ', '.join(f"{col}: {unidecode(val)}" for col, val in row.items() if col != 'club_id')
 
     return pd.DataFrame({'text': df.apply(format_row, axis=1)})
 
@@ -52,6 +74,6 @@ def create_text_games_df(df: pd.DataFrame) -> pd.DataFrame:
             return f'{col}: {val}'
 
     def format_row(row):
-        return ', '.join(f"{format_line(col, val)}" for col, val in row.items() if col != 'game_id')
+        return ', '.join(f"{format_line(col, unidecode(val))}" for col, val in row.items() if col != 'game_id')
 
     return pd.DataFrame({'text': df.apply(format_row, axis=1)})

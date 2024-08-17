@@ -98,7 +98,7 @@ def wrangler(cfg):
 
     if cfg.data.process_raw_data:
         raw_dataframes = {}
-        raw_csvs_dir = f'{data_dir}/raw_csvs'
+        raw_csvs_dir = f'{data_dir}/raw-csvs'
         for filename in os.listdir(raw_csvs_dir):
             if filename == 'clubs.csv':
                 continue

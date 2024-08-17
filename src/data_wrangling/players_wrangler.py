@@ -135,6 +135,6 @@ def create_text_players_df(df: pd.DataFrame) -> pd.DataFrame:
         return f'{col}: {val}'
 
     def format_row(row):
-        return ', '.join(f"{format_line(col, val)}" for col, val in row.items() if col != 'player_id')
+        return ', '.join(f"{format_line(col, unidecode(val))}" for col, val in row.items() if col != 'player_id')
 
     return pd.DataFrame({'text': df.apply(format_row, axis=1)})

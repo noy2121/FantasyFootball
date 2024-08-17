@@ -141,6 +141,6 @@ text_players_cols = ["player_name",
                      "price"
                      ]
 
-prev_champions_league_vals = ["Winners", "Second", "Semi-Finals", "Quarter-Finals", "Round of 16", "Group Stage", "Not Qualified"]
+prev_champions_league_vals = ["Winners", "Final", "Semi-Final", "Quarter-Final", "Round of 16", "Group Stage", "Not Qualified"]
 
-competition_vals = ["domestic_league", "champions_league", "other"]
+competition_types = ["domestic_league", "domestic_cup", "champions_league", "europa_league", "other"]

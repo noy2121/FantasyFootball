@@ -1,5 +1,7 @@
 from typing import Dict
 import pandas as pd
+from unidecode import unidecode
+
 from wrangler_utils import get_club_name_by_club_id
 from datasets_structure import events_cols
 
@@ -104,6 +106,6 @@ def create_text_events_df(dfs: Dict[str, pd.DataFrame]) -> pd.DataFrame:
     print('Convert Events data to text...')
 
     def format_row(row):
-        return ', '.join(f"{format_line(col, val, dfs)}" for col, val in row.items() if col != 'event_id')
+        return ', '.join(f"{format_line(col, unidecode(val), dfs)}" for col, val in row.items() if col != 'event_id')
 
     return pd.DataFrame({'text': dfs['events'].apply(format_row, axis=1)})

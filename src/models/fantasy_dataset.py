@@ -3,240 +3,120 @@ import torch
 import numpy as np
 import pandas as pd
 import pyarrow as pa
-from pathlib import Path
+from typing import List, Dict
+
 from datasets import Dataset, DatasetDict
 from transformers import AutoTokenizer
-from typing import Dict, List
-from functools import partial, reduce
-
-import random
-from typing import List, Dict
-import torch
-from torch.utils.data import Dataset, DataLoader, Sampler
-from transformers import AutoTokenizer
-import numpy as np
-
-
-class WeightedRandomSampler(Sampler):
-    def __init__(self, weights, num_samples, replacement=True):
-        self.weights = torch.DoubleTensor(weights)
-        self.num_samples = num_samples
-        self.replacement = replacement
-
-    def __iter__(self):
-        return iter(torch.multinomial(self.weights, self.num_samples, self.replacement).tolist())
-
-    def __len__(self):
-        return self.num_samples
-
-
-class MultiDataset(Dataset):
-    def __init__(self, data_dir: str, tokenizer, filenames: List[str] = None, max_length=512):
-
-        self.dataframes = self.load_dataframes(data_dir, filenames)
-
-        self.tokenizer = tokenizer
-        self.max_length = max_length
-        self.dataframes_keys = list(self.dataframes.keys())
-
-        # Calculate total length and weights
-        self.dataframes_sizes = [len(df) for df in self.dataframes.values()]
-        self.total_size = sum(self.dataframes_sizes)
-        self.weights = [size / self.total_size for size in self.dataframes_sizes]
-
-        self.cumulative_sizes = np.cumsum(self.dataframes_sizes)
-
-    def __len__(self):
-        return self.total_size
-
-    def __getitem__(self, idx):
-        df_idx = np.searchsorted(self.cumulative_sizes, idx, side='right')
-        if df_idx > 0:
-            idx = idx - self.cumulative_sizes[df_idx - 1]
-
-        df_key = self.dataframes_keys[df_idx]
-        df = self.dataframes[df_key]
-        text = df.iloc[idx]['text']
-
-        encoding = self.tokenizer.encode_plus(
-            text,
-            add_special_tokens=True,
-            max_length=self.max_length,
-            return_token_type_ids=False,
-            padding="max_length",
-            truncation=True,
-            return_attention_mask=True,
-            return_tensors='pt',
-        )
-
-        return {
-            'input_ids': encoding['input_ids'].flatten(),
-            'attention_mask': encoding['attention_mask'].flatten(),
-            'dataset_key': dataset_key
-        }
-
-
-class MultiDataLoader:
-    def __init__(self, dataset, batch_size=32, num_workers=0):
-        self.dataset = dataset
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-
-    def __iter__(self):
-        sampler = WeightedRandomSampler(
-            weights=self.dataset.weights,
-            num_samples=len(self.dataset),
-            replacement=True
-        )
-
-        data_loader = DataLoader(
-            self.dataset,
-            batch_size=self.batch_size,
-            sampler=sampler,
-            num_workers=self.num_workers
-        )
-
-        for batch in data_loader:
-            yield batch
-
-
-# Usage example:
-tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
-
-datasets = {
-    'players': ["Player 1 info", "Player 2 info", ...] * 10000,  # 10k samples
-    'clubs': ["Club 1 info", "Club 2 info", ...] * 100,  # 100 samples
-    'games': ["Game 1 info", "Game 2 info", ...] * 1000,  # 1k samples
-    'events': ["Event 1 info", "Event 2 info", ...] * 5000  # 5k samples
-}
-
-multi_dataset = MultiDataset(datasets, tokenizer)
-data_loader = MultiDataLoader(multi_dataset, batch_size=32)
-
-# Training loop
-for batch in data_loader:
-    input_ids = batch['input_ids']
-    attention_mask = batch['attention_mask']
-    dataset_keys = batch['dataset_key']
-    # ... process batch ...
-
-# Print sampling statistics
-sample_count = {key: 0 for key in datasets.keys()}
-total_samples = 10000  # number of samples to check
-
-for _ in range(total_samples):
-    idx = next(iter(WeightedRandomSampler(multi_dataset.weights, 1)))
-    sample_count[multi_dataset.index_map[idx][0]] += 1
-
-print("Sampling statistics:")
-for key, count in sample_count.items():
-    print(f"{key}: {count / total_samples:.2%}")
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 
 class FantasyDataset:
-    def __init__(self, data_dir: str, filenames: List[str] = None, model_name: str = 'bert-base-uncased'):
+    def __init__(self, data_dir: str, model_name: str, max_length: int = 512):
         self.data_dir = data_dir
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.max_length = max_length
 
-        self.dfs_dict = self.load_datasets(data_dir, filenames)  # Dict[str, pd.DataFrame]
-        self.combined_data = self._combine_data()
-        self.dataset = self._create_dataset()
+        # Load train and test data
+        self.train_data, self.test_data = self.load_data()
 
+        # Initialize separate Dataset objects for train and test
+        self.train_dataset = Dataset(pa.Table.from_pandas(self.train_data))
+        self.test_dataset = Dataset(pa.Table.from_pandas(self.test_data))
 
-
-    def _combine_data(self) -> pd.DataFrame:
-
-        dfs_to_merge = [df for df in self.dfs_dict.values()]
-        combined = reduce(lambda left, right: pd.merge(left, right, ))
-        return combined
-
-    def _create_dataset(self) -> DatasetDict:
-        table = pa.Table.from_pandas(self.combined_data)
-        dataset = Dataset(table)
-
-        # Use a more efficient splitting method
-        train_test = dataset.train_test_split(test_size=0.2, seed=42)
-        train_valid = train_test['train'].train_test_split(test_size=0.1, seed=42)
-
-        return DatasetDict({
-            'train': train_valid['train'],
-            'validation': train_valid['test'],
-            'test': train_test['test']
+        # Create a DatasetDict to hold both datasets
+        self.dataset_dict = DatasetDict({
+            'train': self.train_dataset,
+            'test': self.test_dataset
         })
 
-    def tokenize_function(self, examples: Dict[str, List], text_fields: List[str]) -> Dict[str, torch.Tensor]:
-        texts = [' '.join([str(examples[field][i]) for field in text_fields])
-                 for i in range(len(examples[text_fields[0]]))]
+        # Optionally create a validation set from the train set
+        # self.create_validation_set()
 
-        # Batch tokenization for efficiency
-        tokenized = self.tokenizer(texts, padding="max_length", truncation=True, return_tensors="pt")
+    def load_data(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        train_data = self._load_csvs_from_dir(os.path.join(self.data_dir, 'train'))
+        test_data = self._load_csvs_from_dir(os.path.join(self.data_dir, 'test'))
+        return train_data, test_data
 
-        return {k: v.squeeze(0) for k, v in tokenized.items()}
+    @staticmethod
+    def _load_csvs_from_dir(directory: str) -> pd.DataFrame:
+        csv_files = ['clubs.csv', 'player.csv', 'events.csv', 'games.csv']
+        dataframes = []
+        for file in csv_files:
+            file_path = os.path.join(directory, file)
+            if os.path.exists(file_path):
+                df = pd.read_csv(file_path)
+                df['source'] = file.split('.')[0]  # Add source column
+                dataframes.append(df)
+            else:
+                print(f"Warning: {file} not found in {directory}")
 
-    def get_dataset(self, tokenize: bool = True, text_fields: List[str] = None) -> DatasetDict:
-        if tokenize:
-            if text_fields is None:
-                text_fields = ['player_name', 'club_name', 'event_type']  # Example fields
+        # Concatenate all DataFrames vertically
+        combined = pd.concat(dataframes, axis=0, ignore_index=True)
+        return combined
 
-            # Use partial function for efficiency
-            tokenize_fn = partial(self.tokenize_function, text_fields=text_fields)
+    def create_validation_set(self, valid_size: float = 0.1, seed: int = 42):
+        train_valid = self.train_dataset.train_test_split(test_size=valid_size, seed=seed)
+        self.train_dataset = train_valid['train']
+        self.valid_dataset = train_valid['test']
+        self.dataset_dict['valid'] = self.valid_dataset
+        self.dataset_dict['train'] = self.train_dataset
 
-            return self.dataset.map(
-                tokenize_fn,
-                batched=True,
-                batch_size=1000,  # Adjust based on your memory constraints
-                num_proc=4,  # Adjust based on your CPU
-                remove_columns=self.dataset["train"].column_names
-            )
-        return self.dataset
+    def tokenize_function(self, examples: Dict[str, List]) -> Dict[str, torch.Tensor]:
+        return self.tokenizer(
+            examples['text'],
+            padding="max_length",
+            truncation=True,
+            max_length=self.max_length,
+            return_tensors="pt"
+        )
 
-    def get_dataloader(self, split: str, batch_size: int = 32, shuffle: bool = True) -> torch.utils.data.DataLoader:
-        dataset = self.get_dataset(tokenize=True)[split]
-        return torch.utils.data.DataLoader(
-            dataset,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            num_workers=4,  # Adjust based on your CPU
-            pin_memory=True  # Helps with GPU memory transfer
+    def get_tokenized_dataset(self, split: str) -> Dataset:
+        return self.dataset_dict[split].map(
+            self.tokenize_function,
+            batched=True,
+            batch_size=1000,
+            num_proc=4,
+            remove_columns=['text']  # Keep 'source' column for weighted sampling
         )
 
     def get_numpy_data(self, split: str, columns: List[str]) -> np.ndarray:
-        return self.dataset[split].to_pandas()[columns].to_numpy()
+        return self.dataset_dict[split].to_pandas()[columns].to_numpy()
+
+    def get_source_weights(self, split: str) -> Dict[str, float]:
+        source_counts = self.dataset_dict[split].to_pandas()['source'].value_counts()
+        total_samples = sum(source_counts)
+        weights = {source: count / total_samples for source, count in source_counts.items()}
+        return weights
+
+    def __len__(self):
+        return len(self.train_data)
 
 
-# Usage example
-fantasy_dataset = FantasyDataset('path/to/your/data/directory')
+class FantasyDataLoader:
+    def __init__(self, dataset: FantasyDataset, split: str, batch_size: int = 32, num_workers: int = 4):
+        self.dataset = dataset
+        self.split = split
+        self.batch_size = batch_size
+        self.num_workers = num_workers
 
-# Get tokenized datasets
-tokenized_datasets = fantasy_dataset.get_dataset(tokenize=True)
+        self.tokenized_dataset = self.dataset.get_tokenized_dataset(split)
+        self.source_weights = self.dataset.get_source_weights(split)
 
-# Get a PyTorch DataLoader
-train_dataloader = fantasy_dataset.get_dataloader('train')
+        self.sampler = self._create_weighted_sampler()
 
-# Get numpy array for specific columns
-train_numpy = fantasy_dataset.get_numpy_data('train', ['player_id', 'club_id', 'game_id'])
+    def _create_weighted_sampler(self) -> WeightedRandomSampler:
+        sample_weights = [self.source_weights[source] for source in self.tokenized_dataset['source']]
+        return WeightedRandomSampler(
+            weights=sample_weights,
+            num_samples=len(sample_weights),
+            replacement=True
+        )
 
-# Use with a transformers model
-from transformers import AutoModelForSequenceClassification, Trainer, TrainingArguments
-
-model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased", num_labels=2)
-
-training_args = TrainingArguments(
-    output_dir="./results",
-    learning_rate=2e-5,
-    per_device_train_batch_size=16,
-    per_device_eval_batch_size=16,
-    num_train_epochs=3,
-    weight_decay=0.01,
-    dataloader_num_workers=4,
-    dataloader_pin_memory=True,
-)
-
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=tokenized_datasets["train"],
-    eval_dataset=tokenized_datasets["validation"],
-)
-
-trainer.train()
+    def get_dataloader(self) -> DataLoader:
+        return DataLoader(
+            self.tokenized_dataset,
+            batch_size=self.batch_size,
+            sampler=self.sampler,
+            num_workers=self.num_workers,
+            pin_memory=True
+        )

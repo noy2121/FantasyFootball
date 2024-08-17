@@ -44,3 +44,11 @@ rules_prompt = ("Squad: The team must include 11 selected players: "
                 "Red card: -3 points. "
                 "Negative bonus for conceding goals: conceding one goal cancel the clean sheet points. from the second goal onwards, -1 point for each goal conceded. "
                 "Overtime is counted in the scoring; penalty shootouts after overtime are not counted. ")
+
+one_shot_example = ("Goalkeeper: Andriy Lunin\n"
+                    "Defence: Matteo Darmian, Federico Dimarco, Joao Mario \n"
+                    "Midfield: Jamal Musiala, Dani Olmo, Marcel Sabitzer \n"
+                    "Forward: Bukayo Saka, Erling Haaland, Lamine Yamal \n"
+                    "Budget used: 125M/125M")
+
+few_shot_examples = ("")

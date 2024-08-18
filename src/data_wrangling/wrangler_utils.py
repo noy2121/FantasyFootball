@@ -4,13 +4,21 @@ from typing import List, Set
 
 import numpy as np
 import pandas as pd
-
+from unidecode import unidecode
 from datasets_structure import teams
 from src.utils.utils import ROOT_DIR
 
 
 with open(os.path.join(ROOT_DIR, 'data/club_id_name_mapping.json'), 'r') as f:
     CLUB_IDS_DICT = json.load(f)
+
+
+def fix_name_format(df: pd.DataFrame, colname: str) -> pd.DataFrame:
+    """
+    Standardize the name format by removing accents and special characters.
+    """
+    df[colname] = df[colname].apply(unidecode)
+    return df
 
 
 def get_relevant_club_ids(df: pd.DataFrame) -> Set[int]:
@@ -22,7 +30,7 @@ def get_relevant_club_ids(df: pd.DataFrame) -> Set[int]:
 
 
 def get_club_name_by_club_id(idx: int) -> str:
-    return CLUB_IDS_DICT.get(str(idx), 'Unknown')
+    return unidecode(CLUB_IDS_DICT.get(str(idx), 'Unknown'))
 
 
 def filter_data_by_year(df: pd.DataFrame, year: int) -> pd.DataFrame:

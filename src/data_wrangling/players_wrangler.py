@@ -2,20 +2,17 @@ from functools import reduce
 from typing import Dict, List, Set
 
 import pandas as pd
-from unidecode import unidecode
 
-from wrangler_utils import filter_data_by_year, filter_data_by_club_id, add_period_to_df, get_club_name_by_club_id
-
-
-def fix_name_format(df: pd.DataFrame, colname: str) -> pd.DataFrame:
-    """
-    Standardize the name format by removing accents and special characters.
-    """
-    df[colname] = df[colname].apply(unidecode)
-    return df
+from wrangler_utils import (
+    filter_data_by_year,
+    filter_data_by_club_id,
+    add_period_to_df,
+    get_club_name_by_club_id,
+    fix_name_format
+)
 
 
-def get_player_stats(df: pd.DataFrame, statistic: str, start_year: int) -> pd.DataFrame:
+def get_player_stats(df: pd.DataFrame, statistic: str) -> pd.DataFrame:
     """
     Aggregate player statistics over different periods.
     """
@@ -104,7 +101,7 @@ def create_players_df(dfs: Dict[str, pd.DataFrame], club_ids: Set[int], start_ye
 
     stats_dfs = []
     for colname in ['goals', 'assists', 'yellow_cards', 'red_cards']:
-        curr = get_player_stats(app_df, colname, start_year)
+        curr = get_player_stats(app_df, colname)
         curr.reset_index(drop=True, inplace=True)
         stats_dfs.append(curr)
 
@@ -135,6 +132,6 @@ def create_text_players_df(df: pd.DataFrame) -> pd.DataFrame:
         return f'{col}: {val}'
 
     def format_row(row):
-        return ', '.join(f"{format_line(col, unidecode(val))}" for col, val in row.items() if col != 'player_id')
+        return ', '.join(f"{format_line(col, val)}" for col, val in row.items() if col != 'player_id')
 
     return pd.DataFrame({'text': df.apply(format_row, axis=1)})

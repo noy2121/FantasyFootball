@@ -10,7 +10,7 @@ from pandas.core.generic import NDFrame
 from players_wrangler import create_players_df, create_text_players_df
 from games_wrangler import create_games_df, create_text_games_df, create_text_clubs_df
 from events_wrangler import create_events_df, create_text_events_df
-from wrangler_utils import get_relevant_club_ids
+from wrangler_utils import get_relevant_club_ids, fix_name_format
 from src.utils.utils import ROOT_DIR, set_random_seed, save_dataframes, load_dataframes
 
 
@@ -18,6 +18,7 @@ def prepare_dataframes(raw_dfs: Dict[str, pd.DataFrame], club_ids: Set[int], sta
                        curr_year: int) -> Dict[str, pd.DataFrame]:
 
     clubs_df = raw_dfs['clubs']
+    clubs_df = fix_name_format(clubs_df, 'club_name')
     # create players df
     players_df = create_players_df(raw_dfs, club_ids, start_year, curr_year)
     games_df = create_games_df(raw_dfs['games'], club_ids, start_year, curr_year)

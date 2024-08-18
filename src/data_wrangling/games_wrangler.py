@@ -57,7 +57,7 @@ def create_text_clubs_df(df: pd.DataFrame) -> pd.DataFrame:
     print('Convert Clubs data to text...')
 
     def format_row(row):
-        return ', '.join(f"{col}: {unidecode(val)}" for col, val in row.items() if col != 'club_id')
+        return ', '.join(f"{col}: {val}" for col, val in row.items() if col != 'club_id')
 
     return pd.DataFrame({'text': df.apply(format_row, axis=1)})
 
@@ -74,6 +74,6 @@ def create_text_games_df(df: pd.DataFrame) -> pd.DataFrame:
             return f'{col}: {val}'
 
     def format_row(row):
-        return ', '.join(f"{format_line(col, unidecode(val))}" for col, val in row.items() if col != 'game_id')
+        return ', '.join(f"{format_line(col, val)}" for col, val in row.items() if col != 'game_id')
 
     return pd.DataFrame({'text': df.apply(format_row, axis=1)})

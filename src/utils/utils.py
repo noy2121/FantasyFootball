@@ -56,3 +56,10 @@ def load_dataframes(data_dir: str, filenames: List[str] = None) -> Dict[str, pd.
         print(f'\t- {k}: shape {v.shape}')
 
     return dfs
+
+
+def get_hftoken(token_path):
+    with open(token_path, 'r') as f:
+        hf_token = f.read()
+
+    return hf_token

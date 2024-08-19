@@ -1,7 +1,6 @@
 from typing import Set
 
 import pandas as pd
-from unidecode import unidecode
 
 from wrangler_utils import filter_data_by_year, filter_data_by_club_id, add_period_to_df, get_club_name_by_club_id
 from datasets_structure import games_cols

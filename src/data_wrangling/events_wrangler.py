@@ -1,6 +1,5 @@
 from typing import Dict
 import pandas as pd
-from unidecode import unidecode
 
 from wrangler_utils import get_club_name_by_club_id
 from datasets_structure import events_cols

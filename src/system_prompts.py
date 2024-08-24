@@ -1,15 +1,5 @@
 
 
-matches_prompt = [
-    ("Copenhagen", "Manchester City"),
-    ("RB Leipzig", "Real Madrid"),
-    ("Paris Saint-Germain", "Real Sociedad"),
-    ("Lazio", "Bayern Munich"),
-    ("PSV Eindhoven", "Borussia Dortmund"),
-    ("Inter Milan", "Atletico Madrid"),
-    ("Porto", "Arsenal"),
-    ("Napoli", "Barcelona")
-]
 sample_user_prompt = (
     "matches: [Copenhagen vs Manchester City, "
     "RB Leipzig vs Real Madrid, "
@@ -57,16 +47,17 @@ rules_prompt = ("Squad: The team must include 11 selected players: "
                 "Negative bonus for conceding goals: conceding one goal cancel the clean sheet points. from the second goal onwards, -1 point for each goal conceded. "
                 "Overtime is counted in the scoring; penalty shootouts after overtime are not counted. ")
 
-one_shot_example = ("Goalkeeper: Andriy Lunin\n"
-                    "Defence: Matteo Darmian, Federico Dimarco, Joao Mario \n"
-                    "Midfield: Jamal Musiala, Dani Olmo, Marcel Sabitzer \n"
-                    "Attack: Bukayo Saka, Erling Haaland, Lamine Yamal \n"
+one_shot_example = ("Goalkeeper: Andriy Lunin (5M)\n"
+                    "Defence: Matteo Darmian (6M), Federico Dimarco (7M), Joao Mario (6M)\n"
+                    "Midfield: Jamal Musiala (12M), Dani Olmo(10M), Marcel Sabitzer(9M)\n"
+                    "Attack: Bukayo Saka (14M), Erling Haaland (15M), Lamine Yamal (11M)\n"
                     "Budget used: 125M/125M"
                     "season: 2023/24")
 
 player_entry_format = ("Player: {}\n"
                        "Position: {}\n"
                        "Club: {}\n"
+                       "Cost: {}\n"
                        "Last 5 games performance:\n"
                        "\tGoals: {}\n"
                        "\tAssists: {}\n"

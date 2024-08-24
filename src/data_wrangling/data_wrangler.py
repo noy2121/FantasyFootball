@@ -1,7 +1,7 @@
 import os
-from typing import Dict, Set, List, Tuple
+from typing import Dict, Set, Tuple
 from datetime import datetime
-
+import json
 import hydra
 import pandas as pd
 
@@ -9,6 +9,7 @@ from players_wrangler import create_players_df, create_text_players_df
 from games_wrangler import create_games_df, create_text_games_df, create_text_clubs_df
 from events_wrangler import create_events_df, create_text_events_df
 from wrangler_utils import get_relevant_club_ids, fix_name_format
+from generate_data import generate_samples
 from src.utils.utils import ROOT_DIR, set_random_seed, save_dataframes, load_dataframes
 
 
@@ -113,25 +114,36 @@ def wrangler(cfg):
         out_dir = f'{data_dir}/csvs'
         save_dataframes(dataframes, out_dir)
 
-    # TODO: save train/val/test in different folders
-    if cfg.data.split_data:
+    if cfg.data.generate_data:
         dataframes = load_dataframes(f'{data_dir}/csvs')
-        train_test_dfs = train_test_split(dataframes, test_year)
-        print("Save train/test DataFrames...")
-        for key, dfs in train_test_dfs.items():
-            out_dir = f'{data_dir}/preprocessed/{key}/csvs'
-            save_dataframes(dfs, out_dir)
+        train_samples, test_samples = generate_samples(dataframes['clubs'])
+        print("Save train/test data...")
+        with open(f'{data_dir}/preprocessed/train/train.json', 'w') as f:
+            json.dump(train_samples, f)
 
-    if cfg.data.create_text_data:
-        for key in ['train', 'test']:
-            dataframes = load_dataframes(f'{data_dir}/preprocessed/{key}/csvs')
-            dataframes = convert_dfs_to_text(dataframes)
-            print(f"Save {key} Text-DataFrames...")
-            out_dir = f'{data_dir}/preprocessed/{key}/text_data'
-            save_dataframes(dataframes, out_dir)
+        with open(f'{data_dir}/preprocessed/test/test.json', 'w') as f:
+            json.dump(test_samples, f)
+
+        print(f"Generated {len(train_samples)} training samples and {len(test_samples)} test samples.")
+
+    # remove this?
+    # if cfg.data.split_data:
+    #     dataframes = load_dataframes(f'{data_dir}/csvs')
+    #     train_test_dfs = train_test_split(dataframes, test_year)
+    #     print("Save train/test DataFrames...")
+    #     for key, dfs in train_test_dfs.items():
+    #         out_dir = f'{data_dir}/preprocessed/{key}/csvs'
+    #         save_dataframes(dfs, out_dir)
+    #
+    # if cfg.data.create_text_data:
+    #     for key in ['train', 'test']:
+    #         dataframes = load_dataframes(f'{data_dir}/preprocessed/{key}/csvs')
+    #         dataframes = convert_dfs_to_text(dataframes)
+    #         print(f"Save {key} Text-DataFrames...")
+    #         out_dir = f'{data_dir}/preprocessed/{key}/text_data'
+    #         save_dataframes(dataframes, out_dir)
 
 
 if __name__ == '__main__':
-
     set_random_seed()
     wrangler()

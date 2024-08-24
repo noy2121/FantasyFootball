@@ -84,3 +84,9 @@ club_entry_format = ("Club: {}\n"
                      "\tLoses: {}\n"
                      "\tTies: {}\n"
                      "Champions League titles: {}\n")
+
+round_dates = {'Group Stage': ['06/09', '13/09', '04/10', '11/10', '25/10', '01/11'],
+               'Round of 16': ['14/02', '07/03'],
+               'Quarter-Final': ['11/04', '18/04'],
+               'Semi-Final': ['09/05', '16/05'],
+               'Final': ['10/06']}

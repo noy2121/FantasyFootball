@@ -1,10 +1,21 @@
+defaults:
+  - _self_
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+
 data:
   bucket: 'deep-learning-projects'
   data_dir: 'data'
   process_raw_data: False
-  create_text_data: True
+  create_text_data: False
+  generate_data: True
   split_data: False
-  start_year: 2017
+  start_year: 2018
   test_year: 2023
 
 model:

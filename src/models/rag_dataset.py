@@ -51,7 +51,7 @@ class StatsProcessor:
         return club_stats
 
     def initialize_player_stats(self, season: str) -> Dict[int, Dict]:
-
+        season = f'{season}/{int(season[-2:]) + 1}'
         player_stats = self.players_df.set_index('player_id').apply(
             lambda row: {
                 'name': row['player_name'],
@@ -98,8 +98,7 @@ class StatsProcessor:
                     club_stats[cid][target_list].pop(0)
 
     @staticmethod
-    def update_player_stats(player_stats: Dict[int, Dict], events_df: pd.DataFrame, games_df: pd.DataFrame,
-                            lineups_df: pd.DataFrame):
+    def update_player_stats(player_stats: Dict[int, Dict], events_df: pd.DataFrame, lineups_df: pd.DataFrame):
 
         events_array = events_df[['player_id', 'game_id', 'event_type', 'date']].to_numpy()
         lineups_array = lineups_df[lineups_df['type'] == 'starting_lineup'][['player_id', 'game_id']].to_numpy()
@@ -166,6 +165,9 @@ class SentenceEncoder:
 
         return np.vstack(results)
 
+    def save(self, outf):
+        self.model.save(outf)
+
     @staticmethod
     def encode_batch(model, batch):
         return model.encode(batch)
@@ -206,6 +208,8 @@ class SeasonSpecificRAG:
 
         seasons = sorted(set(games_df['date'].dt.strftime('%Y')))
         for season in seasons:
+            if season in ['2017', '2024']:
+                continue
             self._process_season_data(season, players_df, clubs_df, games_df, events_df, lineups_df)
 
     def _get_dataframes(self):
@@ -235,7 +239,7 @@ class SeasonSpecificRAG:
             curr_lineups = self.dataframe_util.filter_by_range_date(season_lineups, prev_dec_date, decision_date)
 
             self.stats_processor.update_club_stats(clubs_stats, curr_games)
-            self.stats_processor.update_player_stats(player_stats, curr_events, curr_games, curr_lineups)
+            self.stats_processor.update_player_stats(player_stats, curr_events, curr_lineups)
 
             rag_entries.extend(self._prepare_club_entries(clubs_df, clubs_stats))
             rag_entries.extend(self._prepare_player_entries(players_df, player_stats))
@@ -297,14 +301,14 @@ class SeasonSpecificRAG:
         for season, dataset in self.rag_data.items():
             dataset.save_to_disk(os.path.join(output_dir, f'rag_dataset_{season}'))
             faiss.write_index(self.indices[season], os.path.join(output_dir, f'rag_index_{season}.faiss'))
-        self.embedding_model.save(os.path.join(output_dir, 'embedding_model'))
+        self.encoder.save(os.path.join(output_dir, 'embedding_model'))
         with open(os.path.join(output_dir, 'seasons.txt'), 'w') as f:
             f.write('\n'.join(self.rag_data.keys()))
 
     @classmethod
     def load(cls, input_dir: str):
         instance = cls.__new__(cls)
-        instance.embedding_model = SentenceTransformer(os.path.join(input_dir, 'embedding_model'))
+        instance.encoder = SentenceTransformer(os.path.join(input_dir, 'embedding_model'))
         with open(os.path.join(input_dir, 'seasons.txt'), 'r') as f:
             seasons = [line.strip() for line in f]
         instance.rag_data = {season: Dataset.load_from_disk(os.path.join(input_dir, f'rag_dataset_{season}')) for season
@@ -332,7 +336,7 @@ class SeasonSpecificRAG:
         nearest_decision_point = decision_points[idx].strftime('%Y-%m-%d')
         valid_indices = [i for i, d in enumerate(self.rag_data[season]['date']) if d <= nearest_decision_point]
 
-        query_embedding = self.embedding_model.encode([query])
+        query_embedding = self.encoder.encode([query], season)
         _, indices = self.indices[season].search(query_embedding.astype('float32'), k)
 
         # filter the results to include only valid indices

@@ -1,4 +1,5 @@
 import os
+
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 import sys
 
@@ -29,9 +30,14 @@ class DataFrameUtils:
 
 
 class StatsProcessor:
-    @staticmethod
-    def initialize_clubs_stats(clubs_df: pd.DataFrame) -> Dict[int, Dict]:
-        club_stats = clubs_df.set_index('club_id').apply(
+
+    def __init__(self, players_df, clubs_df):
+
+        self.players_df = players_df
+        self.clubs_df = clubs_df
+
+    def initialize_clubs_stats(self) -> Dict[int, Dict]:
+        club_stats = self.clubs_df.set_index('club_id').apply(
             lambda row: {
                 'name': row['club_name'],
                 'cl_titles': row['number_of_champions_league_titles'],
@@ -44,16 +50,15 @@ class StatsProcessor:
 
         return club_stats
 
-    @staticmethod
-    def initialize_player_stats(player_df: pd.DataFrame, clubs_df: pd.DataFrame) -> Dict[int, Dict]:
-        merged_df = player_df.merge(clubs_df[['club_id', 'club_name']], on='club_id', how='left')
-        player_stats = merged_df.set_index('player_id').apply(
+    def initialize_player_stats(self, season: str) -> Dict[int, Dict]:
+
+        player_stats = self.players_df.set_index('player_id').apply(
             lambda row: {
                 'name': row['player_name'],
                 'position': row['position'],
-                'club_id': row['club_id'],
-                'club_name': row['club_name'],
-                'price': row['price'],
+                'club_id': row[f'{season}_club_id'],
+                'club_name': self._get_club_name(row[f'{season}_club_id']),
+                'cost': row[f'{season}_cost'],
                 'seasonal': {'goals': 0, 'assists': 0, 'lineups': 0},
                 'last_5': []
             },
@@ -61,6 +66,10 @@ class StatsProcessor:
         ).to_dict()
 
         return player_stats
+
+    def _get_club_name(self, club_id):
+
+        club_name = self.clubs_df.loc[self.clubs_df['club_id'] == club_id, 'club_name']
 
     @staticmethod
     def update_club_stats(club_stats: Dict[int, Dict], games_df: pd.DataFrame):
@@ -77,8 +86,10 @@ class StatsProcessor:
                 if cid not in club_stats:
                     continue
 
-                result = 'win' if (is_home and home_goals > away_goals) or (not is_home and away_goals > home_goals) else \
-                         'lose' if (is_home and home_goals < away_goals) or (not is_home and away_goals < home_goals) else 'tie'
+                result = 'win' if (is_home and home_goals > away_goals) or (
+                            not is_home and away_goals > home_goals) else \
+                    'lose' if (is_home and home_goals < away_goals) or (
+                                not is_home and away_goals < home_goals) else 'tie'
 
                 club_stats[cid]['seasonal'][result] += 1
                 target_list = 'last_5_cl' if is_cl else 'last_5_dl'
@@ -87,7 +98,8 @@ class StatsProcessor:
                     club_stats[cid][target_list].pop(0)
 
     @staticmethod
-    def update_player_stats(player_stats: Dict[int, Dict], events_df: pd.DataFrame, games_df: pd.DataFrame, lineups_df: pd.DataFrame):
+    def update_player_stats(player_stats: Dict[int, Dict], events_df: pd.DataFrame, games_df: pd.DataFrame,
+                            lineups_df: pd.DataFrame):
 
         events_array = events_df[['player_id', 'game_id', 'event_type', 'date']].to_numpy()
         lineups_array = lineups_df[lineups_df['type'] == 'starting_lineup'][['player_id', 'game_id']].to_numpy()
@@ -137,7 +149,6 @@ class StatsProcessor:
 
 class SentenceEncoder:
     def __init__(self, model_name: str):
-
         self.model = self._load_embedding_model(model_name)
         self.num_processes = max(1, cpu_count() - 1)
 
@@ -185,7 +196,7 @@ class SeasonSpecificRAG:
         self.encoder = SentenceEncoder(embedding_model_name)
 
         self.dataframe_util = DataFrameUtils()
-        self.stats_processor = StatsProcessor()
+        self.stats_processor = StatsProcessor(self.dataframes['players'], self.dataframes['clubs'])
 
     def prepare_rag_data(self):
         players_df, games_df, events_df, clubs_df, lineups_df = self._get_dataframes()
@@ -212,12 +223,13 @@ class SeasonSpecificRAG:
         season_events = self.dataframe_util.filter_and_sort_by_date(events_df, season_start, season_end)
         season_lineups = self.dataframe_util.filter_and_sort_by_date(lineups_df, season_start, season_end)
 
-        clubs_stats = self.stats_processor.initialize_clubs_stats(clubs_df)
-        player_stats = self.stats_processor.initialize_player_stats(players_df, clubs_df)
+        clubs_stats = self.stats_processor.initialize_clubs_stats()
+        player_stats = self.stats_processor.initialize_player_stats(season)
 
         rag_entries = []
         prev_dec_date = season_start
-        for i, decision_date in enumerate(tqdm(decision_points[1:], file=sys.stdout, colour='WHITE', desc=f'Process {season} Data')):
+        for i, decision_date in enumerate(
+                tqdm(decision_points[1:], file=sys.stdout, colour='WHITE', desc=f'Process {season} Data')):
             curr_games = self.dataframe_util.filter_by_range_date(season_games, prev_dec_date, decision_date)
             curr_events = self.dataframe_util.filter_by_range_date(season_events, prev_dec_date, decision_date)
             curr_lineups = self.dataframe_util.filter_by_range_date(season_lineups, prev_dec_date, decision_date)
@@ -230,7 +242,7 @@ class SeasonSpecificRAG:
 
             prev_dec_date = decision_date
 
-        assert len(rag_entries) == len(decision_points[1:])*(len(clubs_df) + len(players_df)),\
+        assert len(rag_entries) == len(decision_points[1:]) * (len(clubs_df) + len(players_df)), \
             f'Number of rag_enries is different than number of date!!!'
 
         self.rag_data[season] = Dataset.from_dict({
@@ -239,7 +251,7 @@ class SeasonSpecificRAG:
         })
 
     def _generate_decision_points(self, start: datetime, end: datetime) -> List[datetime]:
-        return [start + timedelta(days=i*7) for i in range((end - start).days // 7)]
+        return [start + timedelta(days=i * 7) for i in range((end - start).days // 7)]
 
     def _prepare_club_entries(self, clubs_df: pd.DataFrame, club_stats: Dict[int, Dict]) -> List[str]:
         return [self.club_entry_format.format(
@@ -255,6 +267,7 @@ class SeasonSpecificRAG:
             stats['name'],
             stats['position'],
             stats['club_name'],
+            stats['cost'],
             *self._calculate_last_5_stats(stats['last_5']),
             stats['seasonal']['goals'], stats['seasonal']['assists'], stats['seasonal']['lineups']
         ) for player_id in players_df['player_id'] for stats in [player_stats[player_id]]]
@@ -294,8 +307,10 @@ class SeasonSpecificRAG:
         instance.embedding_model = SentenceTransformer(os.path.join(input_dir, 'embedding_model'))
         with open(os.path.join(input_dir, 'seasons.txt'), 'r') as f:
             seasons = [line.strip() for line in f]
-        instance.rag_data = {season: Dataset.load_from_disk(os.path.join(input_dir, f'rag_dataset_{season}')) for season in seasons}
-        instance.indices = {season: faiss.read_index(os.path.join(input_dir, f'rag_index_{season}.faiss')) for season in seasons}
+        instance.rag_data = {season: Dataset.load_from_disk(os.path.join(input_dir, f'rag_dataset_{season}')) for season
+                             in seasons}
+        instance.indices = {season: faiss.read_index(os.path.join(input_dir, f'rag_index_{season}.faiss')) for season in
+                            seasons}
         return instance
 
     def retrieve_relevant_info(self, query: str, date: str, season: str, k: int = 5) -> List[str]:
@@ -327,7 +342,6 @@ class SeasonSpecificRAG:
 
 
 if __name__ == '__main__':
-
     # Usage example
     out_dir = os.path.join(ROOT_DIR, 'data/rag')
     data_dir = os.path.join(ROOT_DIR, 'data/csvs')
@@ -346,4 +360,3 @@ if __name__ == '__main__':
     # for info in relevant_info:
     #     print(info)
     # print("\n")
-

@@ -1,25 +1,21 @@
 import os
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
+import sys
+
 import faiss
+import bisect
+import torch
 import pandas as pd
-from collections import defaultdict
+import numpy as np
+from tqdm import tqdm
 from datetime import datetime, timedelta
 from typing import List, Dict
 from datasets import Dataset
+from multiprocessing import Pool, cpu_count
 from sentence_transformers import SentenceTransformer
 
-from src.system_prompts import player_entry_format, club_entry_format
-from src.utils.utils import load_dataframes, ROOT_DIR, get_hftoken
-
-
-import os
-from datetime import datetime, timedelta
-from typing import Dict, List
-from collections import defaultdict
-
-import pandas as pd
-import faiss
-from datasets import Dataset
-from sentence_transformers import SentenceTransformer
+from system_prompts import player_entry_format, club_entry_format
+from utils.utils import load_dataframes, ROOT_DIR, get_hftoken
 
 
 class DataFrameUtils:
@@ -35,70 +31,139 @@ class DataFrameUtils:
 class StatsProcessor:
     @staticmethod
     def initialize_clubs_stats(clubs_df: pd.DataFrame) -> Dict[int, Dict]:
-        return {row['club_id']: {
-            'name': row['club_name'],
-            'cl_titles': row['number_of_champions_league_titles'],
-            'seasonal': defaultdict(int),
-            'last_5_cl': [],
-            'last_5_dl': []
-        } for _, row in clubs_df.iterrows()}
+        club_stats = clubs_df.set_index('club_id').apply(
+            lambda row: {
+                'name': row['club_name'],
+                'cl_titles': row['number_of_champions_league_titles'],
+                'seasonal': {'win': 0, 'lose': 0, 'tie': 0},
+                'last_5_cl': [],
+                'last_5_dl': []
+            },
+            axis=1
+        ).to_dict()
+
+        return club_stats
 
     @staticmethod
     def initialize_player_stats(player_df: pd.DataFrame, clubs_df: pd.DataFrame) -> Dict[int, Dict]:
-        return {row['player_id']: {
-            'name': row['player_name'],
-            'position': row['position'],
-            'club_id': row['club_id'],
-            'club_name': clubs_df.loc[clubs_df['club_id'] == row['club_id'], 'club_name'].iloc[0],
-            'seasonal': defaultdict(int),
-            'last_5': []
-        } for _, row in player_df.iterrows()}
+        merged_df = player_df.merge(clubs_df[['club_id', 'club_name']], on='club_id', how='left')
+        player_stats = merged_df.set_index('player_id').apply(
+            lambda row: {
+                'name': row['player_name'],
+                'position': row['position'],
+                'club_id': row['club_id'],
+                'club_name': row['club_name'],
+                'price': row['price'],
+                'seasonal': {'goals': 0, 'assists': 0, 'lineups': 0},
+                'last_5': []
+            },
+            axis=1
+        ).to_dict()
+
+        return player_stats
 
     @staticmethod
     def update_club_stats(club_stats: Dict[int, Dict], games_df: pd.DataFrame):
+
         for _, game in games_df.iterrows():
             home_id, away_id = game['home_club_id'], game['away_club_id']
             home_goals, away_goals = game['home_club_goals'], game['away_club_goals']
             is_cl = game['competition_type'] == 'champions_league'
 
-            for club_id, is_home in [(home_id, True), (away_id, False)]:
+            if home_id not in club_stats and away_id not in club_stats:
+                raise ValueError(f"Neither home club {home_id} nor away club {away_id} found in club_stats")
+
+            for cid, is_home in [(home_id, True), (away_id, False)]:
+                if cid not in club_stats:
+                    continue
+
                 result = 'win' if (is_home and home_goals > away_goals) or (not is_home and away_goals > home_goals) else \
                          'lose' if (is_home and home_goals < away_goals) or (not is_home and away_goals < home_goals) else 'tie'
 
-                club_stats[club_id]['seasonal'][result] += 1
+                club_stats[cid]['seasonal'][result] += 1
                 target_list = 'last_5_cl' if is_cl else 'last_5_dl'
-                club_stats[club_id][target_list].append(result)
-                if len(club_stats[club_id][target_list]) > 5:
-                    club_stats[club_id][target_list].pop(0)
+                club_stats[cid][target_list].append(result)
+                if len(club_stats[cid][target_list]) > 5:
+                    club_stats[cid][target_list].pop(0)
 
     @staticmethod
     def update_player_stats(player_stats: Dict[int, Dict], events_df: pd.DataFrame, games_df: pd.DataFrame, lineups_df: pd.DataFrame):
-        for _, erow in events_df.iterrows():
-            player_id = erow['player_id']
-            if erow['event_type'] == 'Goals':
-                player_stats[player_id]['seasonal']['goals'] += 1
-            elif erow['event_type'] == 'Assists':
-                player_stats[player_id]['seasonal']['assists'] += 1
 
-        for _, lrow in lineups_df.iterrows():
-            if lrow['type'] == 'starting_lineup':
-                player_stats[lrow['player_id']]['seasonal']['lineups'] += 1
+        events_array = events_df[['player_id', 'game_id', 'event_type', 'date']].to_numpy()
+        lineups_array = lineups_df[lineups_df['type'] == 'starting_lineup'][['player_id', 'game_id']].to_numpy()
 
-        for _, game in games_df.iterrows():
-            game_events = events_df[events_df['game_id'] == game['game_id']]
-            game_lineups = lineups_df[lineups_df['game_id'] == game['game_id']]
-            for club_id in [game['home_club_id'], game['away_club_id']]:
-                for player_id, stats in player_stats.items():
-                    if stats['club_id'] == club_id:
-                        player_events = game_events[game_events['player_id'] == player_id]
-                        curr_perf = {
-                            'goals': player_events[player_events['event_type'] == 'Goals'].shape[0],
-                            'assists': player_events[player_events['event_type'] == 'Assists'].shape[0],
-                            'lineups': int(game_lineups[(game_lineups['player_id'] == player_id) & (game_lineups['type'] == 'starting_lineup')].shape[0] > 0)
-                        }
-                        stats['last_5'].append(curr_perf)
-                        if len(stats['last_5']) > 5:
-                            stats['last_5'].pop(0)
+        player_events = {}
+        player_lineups = {}
+
+        for pid, gid, etype, date in events_array:
+            if pid not in player_events:
+                player_events[pid] = {'goals': 0, 'assists': 0, 'games': set(), 'last_5': []}
+            player_events[pid]['goals'] += (etype == 'Goals')
+            player_events[pid]['assists'] += (etype == 'Assists')
+            player_events[pid]['games'].add((gid, date))
+
+        for pid, gid in lineups_array:
+            if pid not in player_lineups:
+                player_lineups[pid] = set()
+            player_lineups[pid].add(gid)
+
+        # Update player stats
+        for pid, stats in player_stats.items():
+            if pid in player_events:
+                events = player_events[pid]
+                stats['seasonal']['goals'] = events['goals']
+                stats['seasonal']['assists'] = events['assists']
+                stats['seasonal']['lineups'] = len(player_lineups.get(pid, set()))
+
+                # Sort games by date and get the last 5
+                last_5_games = sorted(events['games'], key=lambda x: x[1])[-5:]
+                existing_gids = [item['game_id'] for item in stats['last_5']]
+                for gid, _ in last_5_games:
+                    if gid in existing_gids:
+                        continue
+                    game_events = events_array[(events_array[:, 0] == pid) & (events_array[:, 1] == gid)]
+                    curr_perf = {
+                        'game_id': gid,
+                        'goals': np.sum(game_events[:, 2] == 'Goals'),
+                        'assists': np.sum(game_events[:, 2] == 'Assists'),
+                        'lineups': int(gid in player_lineups.get(pid, set()))
+                    }
+                    stats['last_5'].append(curr_perf)
+                    existing_gids.append(gid)
+                    if len(stats['last_5']) > 5:
+                        removed_game = stats['last_5'].pop(0)
+                        existing_gids.remove(removed_game['game_id'])
+
+
+class SentenceEncoder:
+    def __init__(self, model_name: str):
+
+        self.model = self._load_embedding_model(model_name)
+        self.num_processes = max(1, cpu_count() - 1)
+
+    def encode(self, texts, season, batch_size=64):
+        batches = [texts[i: i + batch_size] for i in range(0, len(texts), batch_size)]
+        inputs = [(self.model, batch) for batch in batches]
+        with Pool(self.num_processes) as pool:
+            results = list(
+                pool.starmap(self.encode_batch, tqdm(inputs,
+                                                     file=sys.stdout,
+                                                     total=len(inputs),
+                                                     colour='WHITE',
+                                                     desc=f'Encoding {season} Data'))
+            )
+
+        return np.vstack(results)
+
+    @staticmethod
+    def encode_batch(model, batch):
+        return model.encode(batch)
+
+    @staticmethod
+    def _load_embedding_model(model_name: str) -> SentenceTransformer:
+        token_path = os.path.join(ROOT_DIR, 'data/keys/huggingface_token.txt')
+        hf_token = get_hftoken(token_path)
+        return SentenceTransformer(model_name, token=hf_token)
 
 
 class SeasonSpecificRAG:
@@ -106,20 +171,21 @@ class SeasonSpecificRAG:
     club_entry_format = club_entry_format
     player_entry_format = player_entry_format
 
-    def __init__(self, data_dir: str, embedding_model: str = "all-MiniLM-L6-v2"):
+    def __init__(self, data_dir: str, embedding_model_name: str = "all-MiniLM-L6-v2", device: str = None):
         self.data_dir = data_dir
         self.indices = {}
         self.rag_data = {}
         self.dataframes = load_dataframes(data_dir)
-        self.embedding_model = self._load_embedding_model(embedding_model)
+
+        if device is None:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            self.device = device
+
+        self.encoder = SentenceEncoder(embedding_model_name)
 
         self.dataframe_util = DataFrameUtils()
         self.stats_processor = StatsProcessor()
-
-    def _load_embedding_model(self, model_name: str) -> SentenceTransformer:
-        token_path = os.path.join(os.path.dirname(__file__), 'data/keys/huggingface_token.txt')
-        hf_token = get_hftoken(token_path)
-        return SentenceTransformer(model_name, token=hf_token)
 
     def prepare_rag_data(self):
         players_df, games_df, events_df, clubs_df, lineups_df = self._get_dataframes()
@@ -138,8 +204,8 @@ class SeasonSpecificRAG:
     def _process_season_data(self, season: str, players_df: pd.DataFrame, clubs_df: pd.DataFrame,
                              games_df: pd.DataFrame, events_df: pd.DataFrame, lineups_df: pd.DataFrame):
 
-        season_start = datetime(int(season), 8, 1)
-        season_end = datetime(int(season) + 1, 8, 1)
+        season_start = datetime(int(season), 8, 10)
+        season_end = datetime(int(season) + 1, 6, 20)
         decision_points = self._generate_decision_points(season_start, season_end)
 
         season_games = self.dataframe_util.filter_and_sort_by_date(games_df, season_start, season_end)
@@ -151,7 +217,7 @@ class SeasonSpecificRAG:
 
         rag_entries = []
         prev_dec_date = season_start
-        for decision_date in decision_points:
+        for i, decision_date in enumerate(tqdm(decision_points[1:], file=sys.stdout, colour='WHITE', desc=f'Process {season} Data')):
             curr_games = self.dataframe_util.filter_by_range_date(season_games, prev_dec_date, decision_date)
             curr_events = self.dataframe_util.filter_by_range_date(season_events, prev_dec_date, decision_date)
             curr_lineups = self.dataframe_util.filter_by_range_date(season_lineups, prev_dec_date, decision_date)
@@ -164,9 +230,12 @@ class SeasonSpecificRAG:
 
             prev_dec_date = decision_date
 
+        assert len(rag_entries) == len(decision_points[1:])*(len(clubs_df) + len(players_df)),\
+            f'Number of rag_enries is different than number of date!!!'
+
         self.rag_data[season] = Dataset.from_dict({
             "text": rag_entries,
-            "date": [d.strftime('%Y-%m-%d') for d in decision_points] * (len(clubs_df) + len(players_df))
+            "date": [d.strftime('%Y-%m-%d') for d in decision_points[1:]] * (len(clubs_df) + len(players_df))
         })
 
     def _generate_decision_points(self, start: datetime, end: datetime) -> List[datetime]:
@@ -191,17 +260,26 @@ class SeasonSpecificRAG:
         ) for player_id in players_df['player_id'] for stats in [player_stats[player_id]]]
 
     @staticmethod
-    def _calculate_last_5_stats(last_5):
-        return tuple(sum(game[stat] for game in last_5) for stat in ['goals', 'assists', 'lineups'])
+    def _calculate_last_5_stats(last_5: List[Dict]) -> np.ndarray:
+        if not last_5:
+            return np.array([0, 0, 0])
+        arr = np.array([(d['goals'], d['assists'], d['lineups']) for d in last_5])
+        return arr.sum(axis=0)
 
-    def build_indices(self):
+    def build_indices(self, batch_size=64, device='cpu'):
+        print('Building RAG indices...')
         for season, dataset in self.rag_data.items():
-            embeddings = self.embedding_model.encode(dataset['text'])
+            texts = dataset['text']
+            embeddings = self.encoder.encode(texts, season, batch_size)
+
+            # TODO: add gpu option
             index = faiss.IndexFlatL2(embeddings.shape[1])
             index.add(embeddings.astype('float32'))
             self.indices[season] = index
+            print(f"Index built for season {season}")
 
     def save(self, output_dir: str):
+        print('Saving RAG dataset...')
         os.makedirs(output_dir, exist_ok=True)
         for season, dataset in self.rag_data.items():
             dataset.save_to_disk(os.path.join(output_dir, f'rag_dataset_{season}'))
@@ -220,108 +298,52 @@ class SeasonSpecificRAG:
         instance.indices = {season: faiss.read_index(os.path.join(input_dir, f'rag_index_{season}.faiss')) for season in seasons}
         return instance
 
-    def retrieve_relevant_info(self, query: str, season: str, k: int = 5) -> List[str]:
-        if season not in self.indices:
-            raise ValueError(f"No data available for season {season}")
-        query_embedding = self.embedding_model.encode([query])
-        _, indices = self.indices[season].search(query_embedding.astype('float32'), k)
-        return [self.rag_data[season]['text'][i] for i in indices[0]]
-
-
-    def build_indices(self):
-        for season, dataset in self.rag_data.items():
-            embeddings = self.embedding_model.encode(dataset['text'])
-            index = faiss.IndexFlatL2(embeddings.shape[1])
-            index.add(embeddings.astype('float32'))
-            self.indices[season] = index
-
-    def save(self, output_dir: str):
-        os.makedirs(output_dir, exist_ok=True)
-
-        # Save the RAG datasets
-        for season, dataset in self.rag_data.items():
-            dataset.save_to_disk(os.path.join(output_dir, f'rag_dataset_{season}'))
-
-        # Save the FAISS indices
-        for season, index in self.indices.items():
-            faiss.write_index(index, os.path.join(output_dir, f'rag_index_{season}.faiss'))
-
-        # Save the embedding model
-        self.embedding_model.save(os.path.join(output_dir, 'embedding_model'))
-
-        # Save the list of seasons
-        with open(os.path.join(output_dir, 'seasons.txt'), 'w') as f:
-            for season in self.rag_data.keys():
-                f.write(f"{season}\n")
-
-    @classmethod
-    def load(cls, input_dir: str):
-        instance = cls()
-
-        # Load the embedding model
-        instance.embedding_model = SentenceTransformer(os.path.join(input_dir, 'embedding_model'))
-
-        # Load the list of seasons
-        with open(os.path.join(input_dir, 'seasons.txt'), 'r') as f:
-            seasons = [line.strip() for line in f]
-
-        # Load the RAG datasets and FAISS indices
-        for season in seasons:
-            instance.rag_data[season] = Dataset.load_from_disk(os.path.join(input_dir, f'rag_dataset_{season}'))
-            instance.indices[season] = faiss.read_index(os.path.join(input_dir, f'rag_index_{season}.faiss'))
-
-        return instance
-
-    def retrieve_relevant_info(self, query: str, season: str, k: int = 5) -> List[str]:
+    def retrieve_relevant_info(self, query: str, date: str, season: str, k: int = 5) -> List[str]:
         if season not in self.indices:
             raise ValueError(f"No data available for season {season}")
 
+        query_date = datetime.strptime(date, '%Y-%m-%d')
+        decision_points = [datetime.strptime(d, '%Y-%m-%d') for d in set(self.rag_data[season]['date'])]
+        decision_points.sort()
+
+        # find nearest decision point
+        idx = bisect.bisect_left(decision_points, query_date)
+        if idx == len(decision_points):
+            idx -= 1
+        elif idx > 0 and query_date - decision_points[idx - 1] < decision_points[idx] - query_date:
+            idx -= 1
+
+        # filter the dataset to include only entries up to the nearest decision point
+        nearest_decision_point = decision_points[idx].strftime('%Y-%m-%d')
+        valid_indices = [i for i, d in enumerate(self.rag_data[season]['date']) if d <= nearest_decision_point]
+
         query_embedding = self.embedding_model.encode([query])
         _, indices = self.indices[season].search(query_embedding.astype('float32'), k)
-        return [self.rag_data[season]['text'][i] for i in indices[0]]
+
+        # filter the results to include only valid indices
+        filtered_indices = [i for i in indices[0] if i in valid_indices]
+
+        return [self.rag_data[season]['text'][i] for i in filtered_indices[:k]]
 
 
+if __name__ == '__main__':
 
-# Usage example
-data_dir = os.path.join(ROOT_DIR, 'data/preprocessed/train/csvs')
-rag_system = SeasonSpecificRAG(data_dir)
-rag_system.prepare_rag_data()
-rag_system.build_indices()
-rag_system.save()
+    # Usage example
+    out_dir = os.path.join(ROOT_DIR, 'data/rag')
+    data_dir = os.path.join(ROOT_DIR, 'data/csvs')
+    rag_system = SeasonSpecificRAG(data_dir)
+    rag_system.prepare_rag_data()
+    rag_system.build_indices()
+    rag_system.save(out_dir)
 
-# Later, in your main application
-loaded_rag = SeasonSpecificRAG.load('path/to/save/rag/data')
+    # # Later, in your main application
+    # loaded_rag = SeasonSpecificRAG.load('path/to/save/rag/data')
+    #
+    # query = "Top scorers in the Premier League"
+    # season = "2022/2023"
+    # relevant_info = loaded_rag.retrieve_relevant_info(query, season)
+    # print(f"Relevant information for '{query}' in season {season}:")
+    # for info in relevant_info:
+    #     print(info)
+    # print("\n")
 
-query = "Top scorers in the Premier League"
-season = "2022/2023"
-relevant_info = loaded_rag.retrieve_relevant_info(query, season)
-print(f"Relevant information for '{query}' in season {season}:")
-for info in relevant_info:
-    print(info)
-print("\n")
-
-
-# # Using in FantasyFootballRAGChunked
-# class FantasyFootballRAGChunked:
-#     def __init__(self, model, tokenizer, rag_system: SeasonSpecificRAG):
-#         self.model = model
-#         self.tokenizer = tokenizer
-#         self.rag_system = rag_system
-#
-#     def generate_team_chunked(self, prompt: str, season: str) -> str:
-#         relevant_info = self.rag_system.retrieve_relevant_info(prompt, season)
-#         augmented_prompt = f"{prompt}\nSeason: {season}\n\nRelevant Information:\n" + "\n".join(relevant_info)
-#
-#         inputs = self.tokenizer(augmented_prompt, return_tensors="pt", max_length=1024, truncation=True)
-#         outputs = self.model.generate(**inputs, max_length=2048)
-#         return self.tokenizer.decode(outputs[0])
-#
-#
-# # Usage in main script
-# rag_system = SeasonSpecificRAG.load('path/to/save/rag/data')
-# fantasy_rag = FantasyFootballRAGChunked(fine_tuned_model, tokenizer, rag_system)
-#
-# prompt = "Create a fantasy team with the best performers"
-# season = "2022/2023"
-# response = fantasy_rag.generate_team_chunked(prompt, season)
-# print(response)

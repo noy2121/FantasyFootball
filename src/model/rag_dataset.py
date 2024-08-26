@@ -70,6 +70,7 @@ class StatsProcessor:
     def _get_club_name(self, club_id):
 
         club_name = self.clubs_df.loc[self.clubs_df['club_id'] == club_id, 'club_name']
+        return club_name
 
     @staticmethod
     def update_club_stats(club_stats: Dict[int, Dict], games_df: pd.DataFrame):
@@ -165,12 +166,11 @@ class SentenceEncoder:
 
         return np.vstack(results)
 
+    def encode_batch(self, batch):
+        return self.model.encode(batch)
+
     def save(self, outf):
         self.model.save(outf)
-
-    @staticmethod
-    def encode_batch(model, batch):
-        return model.encode(batch)
 
     @staticmethod
     def _load_embedding_model(model_name: str) -> SentenceTransformer:
@@ -317,7 +317,7 @@ class SeasonSpecificRAG:
                             seasons}
         return instance
 
-    def retrieve_relevant_info(self, query: str, date: str, season: str, k: int = 5) -> List[str]:
+    def retrieve_relevant_info(self, teams: List[str], date: str, season: str, k: int = 5) -> Dict[str, List[str]]:
         if season not in self.indices:
             raise ValueError(f"No data available for season {season}")
 
@@ -336,13 +336,32 @@ class SeasonSpecificRAG:
         nearest_decision_point = decision_points[idx].strftime('%Y-%m-%d')
         valid_indices = [i for i, d in enumerate(self.rag_data[season]['date']) if d <= nearest_decision_point]
 
-        query_embedding = self.encoder.encode([query], season)
-        _, indices = self.indices[season].search(query_embedding.astype('float32'), k)
+        relevant_info = {
+            "teams": [],
+            "players": []
+        }
 
-        # filter the results to include only valid indices
-        filtered_indices = [i for i in indices[0] if i in valid_indices]
+        # Dual Query System: Retrieve both team-level and player-level data
+        for team in teams:
+            # Team-level query
+            team_query = f"{team} team performance {season}"
+            team_query_embedding = self.encoder.encode_batch([team_query])
+            _, team_indices = self.indices[season].search(team_query_embedding.astype('float32'), k)
 
-        return [self.rag_data[season]['text'][i] for i in filtered_indices[:k]]
+            # Filter the team results to include only valid indices
+            filtered_team_indices = [i for i in team_indices[0] if i in valid_indices]
+            relevant_info["teams"].extend([self.rag_data[season]['text'][i] for i in filtered_team_indices[:k]])
+
+            # Player-level query for each player in the team
+            player_query = f"{team} player stats {season}"
+            player_query_embedding = self.encoder.encode_batch([player_query])
+            _, player_indices = self.indices[season].search(player_query_embedding.astype('float32'), k)
+
+            # Filter the player results to include only valid indices
+            filtered_player_indices = [i for i in player_indices[0] if i in valid_indices]
+            relevant_info["players"].extend([self.rag_data[season]['text'][i] for i in filtered_player_indices[:k]])
+
+        return relevant_info
 
 
 if __name__ == '__main__':

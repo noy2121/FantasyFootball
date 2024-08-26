@@ -1,4 +1,5 @@
 import re
+from typing import Tuple
 import torch
 import torch.nn.functional as F
 
@@ -8,7 +9,7 @@ class FantasyTeamLoss(torch.nn.Module):
         super().__init__()
         self.tokenizer = tokenizer
 
-    def forward(self, logits, input_ids):
+    def forward(self, logits: torch.T, input_ids: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         # Standard language modeling loss
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = input_ids[..., 1:].contiguous()
@@ -19,14 +20,15 @@ class FantasyTeamLoss(torch.nn.Module):
         generated_ids = torch.argmax(logits, dim=-1)
         generated_texts = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
 
-        structure_loss = 0
-        for text in generated_texts:
-            structure_loss += self.structure_loss(text)
+        structure_loss = torch.tensor(
+            sum(self.structure_loss(text) for text in generated_texts),
+            device=logits.device
+        )
 
         return lm_loss, structure_loss
 
     @staticmethod
-    def structure_loss(text):
+    def structure_loss(text: str) -> int:
         expected_structure = [
             r"Team:",
             r"\tGoalkeeper: .+ \(\d+M\)",

@@ -11,7 +11,7 @@ from fantasy_data_collator import FantasyTeamDataCollator
 from fantasy_loss import FantasyTeamLoss
 
 
-class FTFantasyModel:
+class FantasyModel:
     def __init__(self, cfg):
 
         self.conf = cfg
@@ -173,7 +173,7 @@ class FTFantasyModel:
         # - Value for money (performance vs cost)
         pass
 
-    def fantasy_metrics(self, eval_pred):
+    def fantasy_metrics(self, eval_pred) -> Dict[str, float]:
         logits, labels = eval_pred.predictions, eval_pred.labels_id
         matches = eval_pred.inputs['matches']
         knockout_rounds = eval_pred.inputs['round']
@@ -207,7 +207,7 @@ class FTFantasyModel:
               f"Avg LM Loss: {avg_lm_loss:.4f}, "
               f"Avg Structure Loss: {avg_structure_loss:.4f}")
 
-    def fantasy_loss(self, outputs, batch):
+    def fantasy_loss(self, outputs, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         self.steps += 1
 
         # calculate loss
@@ -222,7 +222,7 @@ class FTFantasyModel:
         total_loss += l2_lambda * l2_reg
 
         # update losses
-        self.losses['loss'].append(total_loss)
+        self.losses['loss'].append(total_loss.item())
         self.losses['lm_loss'].append(lm_loss.item())
         self.losses['structure_loss'].append(structure_loss.item())
 
@@ -235,7 +235,7 @@ class FTFantasyModel:
 
         return total_loss
 
-    def train(self):
+    def fine_tune(self):
         train_dataset = self.fantasy_dataset.dataset_dict('train')
         eval_dataset = self.fantasy_dataset.dataset_dict('train')
 
@@ -271,7 +271,7 @@ class FTFantasyModel:
 
         trainer.train()
 
-    def inference(self, prompt: str) -> Tuple[Dict[str, List[Tuple[str, int]]], int]:
+    def inference(self, prompt: str) -> Dict[str, List[Tuple[str, int]]]:
         matches = re.findall(r'([\w\s]+) vs ([\w\s]+)', prompt)
         kn_round = re.search(r'round: ([\w\s-]+)', prompt)
         season = re.search(r'season: (\d{4}-\d{2}-\d{2})', prompt)
@@ -292,13 +292,3 @@ class FTFantasyModel:
 
         team, budget_used = self.decode_team(outputs[0])
         return team
-
-
-# Usage
-if __name__ == "__main__":
-    model = FTFantasyModel("config.json")
-    model.train()
-
-    # Example inference
-    team = model.inference("Select a team for the upcoming round")
-    print(team)

@@ -11,6 +11,7 @@ hydra:
 data:
   bucket: 'deep-learning-projects'
   data_dir: 'data'
+  rag_dir: 'data/rag'
   process_raw_data: False
   create_text_data: False
   generate_data: True
@@ -25,25 +26,26 @@ model:
   quant_compute_dtype: 'float16'
   use_double_quant: False
   cache_dir: '.cache\huggingface'
-  huggingface_token_filepath: 'data/keys/huggingface_token.txt'
-
-peft:
-  method: 'p-tuning'
-  r: 64
-  lora_a: 16
-  target_modules: ['query_key_value']
-  dropout: 0.1
+  hf_token_filepath: 'data/keys/huggingface_token.txt'
+  max_length: 512
 
 train:
-  num_epochs: 1
-  batch_size: 4
+  num_epochs: 5
+  batch_size: 16
   gradient_accumulation_steps: 1
   optim: 'paged_adamw_32bit'
   save_steps: 1000
   logging_steps: 1000
   learning_rate: 2e-4
   weight_decay: 0.001
-  checkpoint_name: 'results'
+  out_dir: 'results'
+
+peft:
+  method: 'lora'
+  r: 64
+  lora_a: 16
+  target_modules: ['query_key_value']
+  dropout: 0.1
 
 evaluate:
   models_dir: 'results/ft_models/bigscience'

@@ -2,6 +2,7 @@ import os
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 import sys
+import json
 
 import faiss
 import bisect
@@ -12,6 +13,7 @@ from tqdm import tqdm
 from datetime import datetime, timedelta
 from typing import List, Dict
 from datasets import Dataset
+from omegaconf import DictConfig, OmegaConf
 from multiprocessing import Pool, cpu_count
 from sentence_transformers import SentenceTransformer
 
@@ -41,7 +43,7 @@ class StatsProcessor:
             lambda row: {
                 'name': row['club_name'],
                 'cl_titles': row['number_of_champions_league_titles'],
-                'seasonal': {'win': 0, 'lose': 0, 'tie': 0},
+                'seasonal': {'win': 0, 'lose': 0, 'tie': 0, 'games': 0},
                 'last_5_cl': [],
                 'last_5_dl': []
             },
@@ -50,7 +52,7 @@ class StatsProcessor:
 
         return club_stats
 
-    def initialize_player_stats(self, season: str) -> Dict[int, Dict]:
+    def initialize_players_stats(self, season: str) -> Dict[int, Dict]:
         season = f'{season}/{int(season[-2:]) + 1}'
         player_stats = self.players_df.set_index('player_id').apply(
             lambda row: {
@@ -68,8 +70,9 @@ class StatsProcessor:
         return player_stats
 
     def _get_club_name(self, club_id):
-
-        club_name = self.clubs_df.loc[self.clubs_df['club_id'] == club_id, 'club_name']
+        if np.isnan(club_id) or club_id not in self.clubs_df['club_id'].values:
+            return ''
+        club_name = self.clubs_df.loc[self.clubs_df['club_id'] == club_id, 'club_name'].iloc[0]
         return club_name
 
     @staticmethod
@@ -79,14 +82,19 @@ class StatsProcessor:
             home_id, away_id = game['home_club_id'], game['away_club_id']
             home_goals, away_goals = game['home_club_goals'], game['away_club_goals']
             is_cl = game['competition_type'] == 'champions_league'
+            is_dl = 'domestic' in game['competition_type']
 
-            if home_id not in club_stats and away_id not in club_stats:
-                raise ValueError(f"Neither home club {home_id} nor away club {away_id} found in club_stats")
+            assert home_id not in club_stats and away_id not in club_stats, \
+                f"Neither home club {home_id} nor away club {away_id} found in club_stats"
+
+            if not is_dl and not is_cl:
+                return
 
             for cid, is_home in [(home_id, True), (away_id, False)]:
                 if cid not in club_stats:
                     continue
 
+                club_stats[cid]['seasonal']['games'] += 1
                 result = 'win' if (is_home and home_goals > away_goals) or (
                             not is_home and away_goals > home_goals) else \
                     'lose' if (is_home and home_goals < away_goals) or (
@@ -136,8 +144,8 @@ class StatsProcessor:
                     game_events = events_array[(events_array[:, 0] == pid) & (events_array[:, 1] == gid)]
                     curr_perf = {
                         'game_id': gid,
-                        'goals': np.sum(game_events[:, 2] == 'Goals'),
-                        'assists': np.sum(game_events[:, 2] == 'Assists'),
+                        'goals': int(np.sum(game_events[:, 2] == 'Goals')),
+                        'assists': int(np.sum(game_events[:, 2] == 'Assists')),
                         'lineups': int(gid in player_lineups.get(pid, set()))
                     }
                     stats['last_5'].append(curr_perf)
@@ -184,21 +192,21 @@ class SeasonSpecificRAG:
     club_entry_format = club_entry_format
     player_entry_format = player_entry_format
 
-    def __init__(self, data_dir: str, embedding_model_name: str = "all-MiniLM-L6-v2", device: str = None):
-        self.data_dir = data_dir
+    def __init__(self, cfg: DictConfig, data_dir: str, device: str = 'cpu'):
+
+        self.data_dir = cfg.data_dir
+        self.embedding_model_name = cfg.embedding_model_name
+        self.device = device
+
         self.indices = {}
         self.rag_data = {}
         self.dataframes = load_dataframes(data_dir)
 
-        if device is None:
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        else:
-            self.device = device
-
-        self.encoder = SentenceEncoder(embedding_model_name)
-
+        self.encoder = SentenceEncoder(self.embedding_model_name)
         self.dataframe_util = DataFrameUtils()
         self.stats_processor = StatsProcessor(self.dataframes['players'], self.dataframes['clubs'])
+        self.generate_jsons = cfg.generate_jsons
+        self.jsons_out_dir = cfg.estimation_data_dir
 
     def prepare_rag_data(self):
         players_df, games_df, events_df, clubs_df, lineups_df = self._get_dataframes()
@@ -208,8 +216,6 @@ class SeasonSpecificRAG:
 
         seasons = sorted(set(games_df['date'].dt.strftime('%Y')))
         for season in seasons:
-            if season in ['2017', '2024']:
-                continue
             self._process_season_data(season, players_df, clubs_df, games_df, events_df, lineups_df)
 
     def _get_dataframes(self):
@@ -228,9 +234,11 @@ class SeasonSpecificRAG:
         season_lineups = self.dataframe_util.filter_and_sort_by_date(lineups_df, season_start, season_end)
 
         clubs_stats = self.stats_processor.initialize_clubs_stats()
-        player_stats = self.stats_processor.initialize_player_stats(season)
+        players_stats = self.stats_processor.initialize_players_stats(season)
 
         rag_entries = []
+        player_infer_data = {}
+        club_infer_data = {}
         prev_dec_date = season_start
         for i, decision_date in enumerate(
                 tqdm(decision_points[1:], file=sys.stdout, colour='WHITE', desc=f'Process {season} Data')):
@@ -239,20 +247,48 @@ class SeasonSpecificRAG:
             curr_lineups = self.dataframe_util.filter_by_range_date(season_lineups, prev_dec_date, decision_date)
 
             self.stats_processor.update_club_stats(clubs_stats, curr_games)
-            self.stats_processor.update_player_stats(player_stats, curr_events, curr_lineups)
+            self.stats_processor.update_player_stats(players_stats, curr_events, curr_lineups)
 
             rag_entries.extend(self._prepare_club_entries(clubs_df, clubs_stats))
-            rag_entries.extend(self._prepare_player_entries(players_df, player_stats))
-
+            rag_entries.extend(self._prepare_player_entries(players_df, players_stats))
             prev_dec_date = decision_date
 
+            # this is for the jsons data
+            if season == '2023':
+                player_infer_data[str(decision_date.date())] = players_stats
+                club_infer_data[str(decision_date.date())] = clubs_stats
+
         assert len(rag_entries) == len(decision_points[1:]) * (len(clubs_df) + len(players_df)), \
-            f'Number of rag_enries is different than number of date!!!'
+            f'Number of rag_entries is different than number of date!!!'
 
         self.rag_data[season] = Dataset.from_dict({
             "text": rag_entries,
             "date": [d.strftime('%Y-%m-%d') for d in decision_points[1:]] * (len(clubs_df) + len(players_df))
         })
+
+        if self.generate_jsons and season == '2023':
+            player_infer_data = self.restructure_dict(player_infer_data)
+            club_infer_data = self.restructure_dict(club_infer_data)
+            self.save_jsons(player_infer_data, club_infer_data)
+
+    @staticmethod
+    def restructure_dict(original_dict):
+        restructured_dict = {}
+
+        for date, elems in original_dict.items():
+            restructured_dict[date] = {}
+            for eid, el_info in elems.items():
+                el_name = el_info['name']
+                restructured_dict[date][el_name] = el_info.copy()
+                del restructured_dict[date][el_name]['name']
+
+        return restructured_dict
+
+    def save_jsons(self, player_stats, clubs_stats):
+        with open(f'{self.jsons_out_dir}/players.json', 'w') as f:
+            json.dump(player_stats, f, indent=True)
+        with open(f'{self.jsons_out_dir}/clubs.json', 'w') as f:
+            json.dump(clubs_stats, f, indent=True)
 
     def _generate_decision_points(self, start: datetime, end: datetime) -> List[datetime]:
         return [start + timedelta(days=i * 7) for i in range((end - start).days // 7)]
@@ -283,7 +319,7 @@ class SeasonSpecificRAG:
         arr = np.array([(d['goals'], d['assists'], d['lineups']) for d in last_5])
         return arr.sum(axis=0)
 
-    def build_indices(self, batch_size=64, device='cpu'):
+    def build_indices(self, batch_size=64):
         print('Building RAG indices...')
         for season, dataset in self.rag_data.items():
             texts = dataset['text']

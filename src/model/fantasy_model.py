@@ -17,7 +17,7 @@ class FantasyModel:
 
         self.conf = cfg
         self.data_dir = cfg.data.data_dir
-        self.rag_data_dir = cfg.data.rag_dir
+        self.rag_data_dir = cfg.rag.rag_dir
         self.model_name = cfg.model.model_name
         self.max_length = cfg.model.max_length
         self.out_dir = cfg.train.out_dir
@@ -39,7 +39,7 @@ class FantasyModel:
         self.fantasy_dataset = FantasyDataset(self.data_dir, self.max_length)
         self.data_collator = FantasyTeamDataCollator(self.tokenizer, self.rag_retriever, self.max_length, self.eval_steps)
         self.fantasy_team_loss = FantasyTeamLoss(self.tokenizer)
-        self.data_stats_cache = DataStatsCache(self.conf.estimation_data_dir)
+        self.data_stats_cache = DataStatsCache(self.conf.rag.estimation_data_dir)
 
         self.max_players_per_team = {
             "group stage": 2,

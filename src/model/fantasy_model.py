@@ -9,6 +9,7 @@ from rag_dataset import SeasonSpecificRAG
 from fantasy_dataset import FantasyDataset
 from fantasy_data_collator import FantasyTeamDataCollator
 from fantasy_loss import FantasyTeamLoss
+from fantasy_stats import DataStatsCache
 
 
 class FantasyModel:
@@ -23,23 +24,8 @@ class FantasyModel:
         self.num_epochs = cfg.train.num_epochs
         self.bz = cfg.train.batch_size
 
-        self.model, self.tokenizer = self.create_model_and_tokenizer()
-        self.rag_retriever = SeasonSpecificRAG.load(self.rag_data_dir)
-        self.fantasy_dataset = FantasyDataset(self.data_dir, self.max_length)
-        self.data_collator = FantasyTeamDataCollator(self.tokenizer, self.rag_retriever, self.max_length)
-        self.fantasy_team_loss = FantasyTeamLoss(self.tokenizer)
-
-        # self.valid_team_weight = 0.9
-        # self.invalid_team_weight = 1.2
-        # self.quality_weight = 0.1
-        # self.l2_lambda = 0.01
-        # self.temperature = 0.7
-        # self.consecutive_good_teams = 0
-        # self.patience = 10
-        # self.quality_threshold = 0.8
-
         self.steps = 0
-        self.log_steps = 100
+        self.eval_steps = 100
         self.structure_weight = 1
         self.min_structure_weight = 0.1
         self.losses = {
@@ -47,6 +33,13 @@ class FantasyModel:
             'lm_loss': [],
             'structure_loss': []
         }
+
+        self.model, self.tokenizer = self.create_model_and_tokenizer()
+        self.rag_retriever = SeasonSpecificRAG.load(self.rag_data_dir)
+        self.fantasy_dataset = FantasyDataset(self.data_dir, self.max_length)
+        self.data_collator = FantasyTeamDataCollator(self.tokenizer, self.rag_retriever, self.max_length, self.eval_steps)
+        self.fantasy_team_loss = FantasyTeamLoss(self.tokenizer)
+        self.data_stats_cache = DataStatsCache(self.conf.estimation_data_dir)
 
         self.max_players_per_team = {
             "group stage": 2,
@@ -62,6 +55,8 @@ class FantasyModel:
             "semi-final": 120,
             "final": 120
         }
+
+        self.max_player_score = 100
 
     def create_model_and_tokenizer(self):
         tokenizer = AutoTokenizer.from_pretrained(self.model_name)
@@ -164,30 +159,78 @@ class FantasyModel:
 
         return True, "Team is valid"
 
-    def estimate_team_quality(self, team: Dict[str, List[Tuple[str, int]]]) -> float:
-        # TODO: Implement team quality estimation
-        # This could consider factors like:
-        # - Player recent performance (you might need to fetch this data)
-        # - Team diversity (players from different real-world teams)
-        # - Balance of positions
-        # - Value for money (performance vs cost)
-        pass
+    def _estimate_player_score(self, player_stats: Dict, club_stats: Dict, position: str) -> float:
+        """
+        compute player estimated points based on past performance
+        """
+        if not player_stats:
+            return 0.0
+        goals, assists, lineups = 0, 0, 0
+        if player_stats['last_5']:
+            arr = np.array([(d['goals'], d['assists'], d['lineups']) for d in player_stats['last_5']])
+            goals, assists, lineups = arr.sum(axis=0)
+
+        player_last_5_score = ((4 * goals) + (3 * assists) + (1 * lineups)) / len(goals)
+        player_season_score = ((4 * player_stats['season']['goals'])
+                               + (3 * player_stats['season']['assists'])
+                               + (1 * player_stats['season']['lineups'])) / club_stats['seasonal']['games']
+
+        position_multiplier = {
+            'Goalkeeper': 3,
+            'Defender': 2,
+            'Midfielder': 1.4,
+            'Forward': 1.0
+        }.get(position, 1.0)
+
+        player_score = (player_last_5_score + player_season_score) * position_multiplier
+
+        # add team performance to player's score
+        result_map = {'win': 1, 'tie': 0, 'lose': -1}
+        last_5_cl = [result_map[res] for res in club_stats['last_5_cl']]
+        last_5_dl = [result_map[res] for res in club_stats['last_5_dl']]
+        player_team_score = (sum(last_5_cl) / min(1, len(club_stats['last_5_cl']))
+                             + sum(last_5_dl) / min(1, len(club_stats['last_5_dl'])))
+
+        # Calculate final score and normalize to be between 0 and 1
+        final_score = player_score + player_team_score
+        return min(final_score / self.max_player_score, 1.0)
+
+    def estimate_team_quality(self, team: Dict[str, List[Tuple[str, int]]], date: str, budget_used: int, kn_round: str) -> float:
+        """
+        team = {'goalkeeper': [(player_name, cost)...],'defence': [(player_name, cost)...],...}
+        """
+
+        score = 0.0
+        for position, players in team.items():
+            for player_name, _ in players:
+                player_stats, club_stats = self.data_stats_cache.get(date, player_name)
+                player_score = self._estimate_player_score(player_stats, club_stats, position)
+                score += player_score
+
+        # reward if the model use the budget correctly
+        if budget_used > self.max_budget_per_round[kn_round] - 5:
+            score = min(1.1 * score, 1.0)
+        elif budget_used > self.max_budget_per_round[kn_round] - 10:
+            score = min(1.05 * score, 1.0)
+
+        return score
 
     def fantasy_metrics(self, eval_pred) -> Dict[str, float]:
         logits, labels = eval_pred.predictions, eval_pred.labels_id
         matches = eval_pred.inputs['matches']
         knockout_rounds = eval_pred.inputs['round']
+        dates = eval_pred.inputs['date']
         predictions = logits.argmax(axis=-1)
         decoded_preds = self.tokenizer.batch_decode(predictions, skip_special_tokens=True)
 
         validity_scores = []
         quality_scores = []
-        for pred, match, kn_round in zip(decoded_preds, matches, knockout_rounds):
-            team, budget = self.decode_team(pred)
-            is_valid, _ = self.is_team_valid(team, budget, match, kn_round)
+        for pred, match, kn_round, date in zip(decoded_preds, matches, knockout_rounds, dates):
+            team, budget_used = self.decode_team(pred)
+            is_valid, _ = self.is_team_valid(team, budget_used, match, kn_round)
             validity_scores.append(int(is_valid))
             if is_valid:
-                quality_scores.append(self.estimate_team_quality(team))
+                quality_scores.append(self.estimate_team_quality(team, date, budget_used, kn_round))
 
         validity_rate = sum(validity_scores) / len(validity_scores)
         avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0
@@ -200,9 +243,9 @@ class FantasyModel:
         }
 
     def _log_metrics(self):
-        avg_loss = np.mean(self.losses['loss'][-self.log_steps:])
-        avg_lm_loss = np.mean(self.losses['lm_loss'][-self.log_steps:])
-        avg_structure_loss = np.mean(self.losses['structure_loss'][-self.log_steps:])
+        avg_loss = np.mean(self.losses['loss'][-self.eval_steps:])
+        avg_lm_loss = np.mean(self.losses['lm_loss'][-self.eval_steps:])
+        avg_structure_loss = np.mean(self.losses['structure_loss'][-self.eval_steps:])
         print(f"Step {self.steps}: Avg Loss: {avg_loss:.4f}, "
               f"Avg LM Loss: {avg_lm_loss:.4f}, "
               f"Avg Structure Loss: {avg_structure_loss:.4f}")
@@ -227,7 +270,7 @@ class FantasyModel:
         self.losses['structure_loss'].append(structure_loss.item())
 
         # log metrics every 1000 steps
-        if self.steps % self.log_steps == 0:
+        if self.steps % self.eval_steps == 0:
             self._log_metrics()
 
         # decrease structure weight over time (ensure it doesn't drop below a minimum value)
@@ -253,8 +296,8 @@ class FantasyModel:
             metric_for_best_model='combined_score',
             greater_is_better=True,
             evaluation_strategy='steps',
-            eval_steps=self.log_steps,
-            save_steps=self.log_steps,
+            eval_steps=self.eval_steps,
+            save_steps=self.eval_steps,
             save_total_limit=10
         )
 

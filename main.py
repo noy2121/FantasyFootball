@@ -80,14 +80,6 @@ def main(cfg: DictConfig):
         print("\nInference Result:")
         print_team(result)
 
-    elif mode == "vanilla_inference":
-        # TODO: Implement vanilla inference logic
-        model = FantasyModel(cfg)
-        user_prompt = get_user_input()
-        result = model.vanilla_inference(user_prompt)
-        print("\nInference Result:")
-        print_team(result)
-
     elif mode == "build_rag":
         rag_system = SeasonSpecificRAG(cfg.rag, device)
         rag_system.prepare_rag_data()

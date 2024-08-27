@@ -320,15 +320,17 @@ class FantasyModel:
         season = re.search(r'season: (\d{4}-\d{2}-\d{2})', prompt)
         date_str = re.search(r'date: (\d{4}-\d{2}-\d{2})', prompt)
         teams = [team for match in matches for team in match]
-        combined_input = self.combine_with_rag(prompt, teams, date_str, season)
 
-        inputs = self.tokenizer(combined_input, return_tensors="pt", truncation=True,
+        if not self.conf.inference.vanilla:
+            prompt = self.combine_with_rag(prompt, teams, date_str, season)
+
+        inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True,
                                 max_length=self.max_length)
         outputs = self.model.generate(
             **inputs,
             max_length=self.max_length,
             num_return_sequences=1,
-            no_repeat_ngram_size=2,
+            no_repeat_ngram_size=5,
             temperature=0.7,
             prefix="Team:\n"
         )

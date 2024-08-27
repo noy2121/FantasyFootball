@@ -3,14 +3,17 @@ import torch
 from transformers import DataCollator
 
 from rag_dataset import SeasonSpecificRAG
+from system_prompts import instruction_prompt, short_rules_prompt, full_rules_prompt
 
 
 class FantasyTeamDataCollator(DataCollator):
-    def __init__(self, tokenizer, rag_retriever: SeasonSpecificRAG, max_length: int):
+    def __init__(self, tokenizer, rag_retriever: SeasonSpecificRAG, max_length: int, eval_steps: int):
         super().__init__()
         self.tokenizer = tokenizer
         self.rag_retriever = rag_retriever
         self.max_length = max_length
+        self.eval_steps = eval_steps
+        self.steps = 0
 
     def __call__(self, features):
         batch = {"input_ids": [], "attention_mask": [], "labels": [], "matches": [], "round": []}
@@ -31,6 +34,12 @@ class FantasyTeamDataCollator(DataCollator):
                               f"Teams Info:{rag_info['teams']}\n"
                               f"Players Info:{rag_info['players']}")
 
+            # Decide which system prompt to use
+            if self.steps % self.eval_steps == 0:
+                combined_input = (f"Instructions: {instruction_prompt}\n\n"
+                                  f"League Rules: {full_rules_prompt}\n\n"
+                                  f"{combined_input}")
+
             # Tokenize combined input
             input_encodings = self.tokenizer(combined_input, truncation=True,
                                              max_length=self.max_length, padding="max_length")
@@ -49,5 +58,7 @@ class FantasyTeamDataCollator(DataCollator):
         batch["input_ids"] = torch.stack(batch["input_ids"])
         batch["attention_mask"] = torch.stack(batch["attention_mask"])
         batch["labels"] = torch.stack(batch["labels"])
+
+        self.steps += 1
 
         return batch

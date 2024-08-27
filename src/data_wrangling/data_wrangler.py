@@ -119,10 +119,10 @@ def wrangler(cfg):
         train_samples, test_samples = generate_samples(dataframes['clubs'])
         print("Save train/test data...")
         with open(f'{data_dir}/preprocessed/train/train.json', 'w') as f:
-            json.dump(train_samples, f)
+            json.dump(train_samples, f, indent=True)
 
         with open(f'{data_dir}/preprocessed/test/test.json', 'w') as f:
-            json.dump(test_samples, f)
+            json.dump(test_samples, f, indent=True)
 
         print(f"Generated {len(train_samples)} training samples and {len(test_samples)} test samples.")
 

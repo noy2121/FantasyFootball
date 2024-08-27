@@ -12,6 +12,7 @@ data:
   bucket: 'deep-learning-projects'
   data_dir: 'data'
   rag_dir: 'data/rag'
+  estimation_data_dir: 'data/team_estimation_data'
   process_raw_data: False
   create_text_data: False
   generate_data: True

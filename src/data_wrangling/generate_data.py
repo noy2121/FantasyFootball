@@ -13,8 +13,8 @@ def get_weighted_teams(clubs_df, season, num_teams):
 
     # Create weights based on their performance
     weight_map = {
-        'Winners': 20, 'Final': 20, 'Semi-Final': 20, 'Quarter-Final': 10,
-        'Round of 16': 10, 'Group Stage': 5, 'Not Qualified': 0.5
+        'Winners': 25, 'Final': 20, 'Semi-Final': 20, 'Quarter-Final': 15,
+        'Round of 16': 10, 'Group Stage': 5, 'Not Qualified': 0.1
     }
     weights = np.array([weight_map.get(place, 1) for place in cl_clubs])
 
@@ -67,8 +67,8 @@ def generate_samples(clubs_df, samples_per_season=1000):
 
     for season in seasons:
         for _ in range(samples_per_season):
-            round_name = random.choice(list(round_dates.keys()))
-            date = random.choice(round_dates[round_name])
+            round_name = np.random.choice(list(round_dates.keys()), p=[0.25, 0.25, 0.2, 0.2, 0.1])
+            date = np.random.choice(round_dates[round_name])
             num_matches = matches_in_round[round_name]
             if round_name == 'Group Stage':
                 date = datetime.strptime(f'{date}/{season[2:4]}', '%d/%m/%y').strftime('%Y-%m-%d')
@@ -82,12 +82,12 @@ def generate_samples(clubs_df, samples_per_season=1000):
                 else:
                     train_samples.append(sample)
 
-        train_dict, test_dict = {}, {}
-        for i in range(len(train_samples)):
-            train_dict[f'{i:04}'] = train_samples[i]
+    train_dict, test_dict = {}, {}
+    for i in range(len(train_samples)):
+        train_dict[f'{i:04}'] = train_samples[i]
 
-        for j in range(len(test_samples)):
-            test_dict[f'{i+j+1:04}'] = test_samples[j]
+    for j in range(len(test_samples)):
+        test_dict[f'{i+j+1:04}'] = test_samples[j]
 
     return train_dict, test_dict
 

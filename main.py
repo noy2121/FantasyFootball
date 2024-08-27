@@ -1,6 +1,7 @@
 import os
 import re
 import hydra
+import torch
 from typing import List, Dict, Tuple
 from omegaconf import DictConfig, OmegaConf
 from src.model.fantasy_model import FantasyModel
@@ -62,6 +63,7 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg.overrides))
 
     mode = cfg.mode
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     if mode == "fine_tune":
         model = FantasyModel(cfg)
@@ -78,8 +80,16 @@ def main(cfg: DictConfig):
         print("\nInference Result:")
         print_team(result)
 
-    elif mode == "create_rag_dataset":
-        rag_system = SeasonSpecificRAG(cfg.data.data_dir)
+    elif mode == "vanilla_inference":
+        # TODO: Implement vanilla inference logic
+        model = FantasyModel(cfg)
+        user_prompt = get_user_input()
+        result = model.vanilla_inference(user_prompt)
+        print("\nInference Result:")
+        print_team(result)
+
+    elif mode == "build_rag":
+        rag_system = SeasonSpecificRAG(cfg.rag, device)
         rag_system.prepare_rag_data()
         rag_system.build_indices()
         rag_system.save(cfg.data.rag_dir)

@@ -24,8 +24,8 @@ class FantasyEvaluator:
 
     def load_models(self):
         models = []
-        for path in self.cfg.evaluation.model_paths:
-            model = FantasyModel.load_from_checkpoint(path)
+        for model_dir in self.cfg.evaluation.model_paths:
+            model = FantasyModel.load_from_checkpoint(model_dir)
             model.eval()
             model.to(self.device)
             models.append(model)

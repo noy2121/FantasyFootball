@@ -1,9 +1,12 @@
 import re
 import torch
 import numpy as np
+from pathlib import Path
 from typing import List, Dict, Tuple
 from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments
 from transformers import EarlyStoppingCallback
+from peft import PeftModel, get_peft_model, LoraConfig, PrefixTuningConfig, TaskType
+from peft.utils.other import TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING as LoRA_MODULES_MAPPING
 
 from rag_dataset import SeasonSpecificRAG
 from fantasy_dataset import FantasyDataset
@@ -20,12 +23,14 @@ class FantasyModel:
         self.rag_data_dir = cfg.rag.rag_dir
         self.model_name = cfg.model.model_name
         self.max_length = cfg.model.max_length
-        self.out_dir = cfg.train.out_dir
+        self.peft_method = cfg.train.peft_method
         self.num_epochs = cfg.train.num_epochs
         self.bz = cfg.train.batch_size
+        self.out_dir = f"{cfg.train.out_dir}/{self.model_name.split('/')[-1]}/{self.peft_method}"
+        Path(self.out_dir).mkdir(parents=True, exist_ok=True)
 
         self.steps = 0
-        self.eval_steps = 100
+        self.eval_steps = cfg.train.evaluation_steps
         self.structure_weight = 1
         self.min_structure_weight = 0.1
         self.losses = {
@@ -58,10 +63,36 @@ class FantasyModel:
 
         self.max_player_score = 100
 
+        if self.peft_method != 'all':
+            self.model = self.apply_peft_model()
+
     def create_model_and_tokenizer(self):
         tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         model = AutoModelForCausalLM.from_pretrained(self.model_name)
         return model, tokenizer
+
+    def apply_peft_model(self):
+        if self.peft_method == 'lora':
+            default_target_modules = LoRA_MODULES_MAPPING.get(self.model_name, ["q_proj", "v_proj"])
+            peft_config = LoraConfig(
+                task_type=TaskType.CAUSAL_LM,
+                r=self.conf.peft.r,
+                lora_alpha=self.conf.peft.lora_alpha,
+                lora_dropout=self.conf.peft.dropout,
+                bias='none',
+                target_modules=default_target_modules
+            )
+        elif self.peft_method == 'prefix_tuning':
+            peft_config = PrefixTuningConfig(
+                task_type=TaskType.CAUSAL_LM,
+                num_virtual_tokens=20,
+                prefix_projection=True
+            )
+        else:
+            raise ValueError(f"Unsupported PEFT method: {self.peft_method}")
+
+        model = get_peft_model(self.model, peft_config)
+        return model
 
     def combine_with_rag(self, input_text: str, teams: List[str], date: str, season: str) -> str:
         # Retrieve RAG information
@@ -314,22 +345,24 @@ class FantasyModel:
 
         trainer.train()
 
-        # save model
-        self.save_checkpoint()
+        # Save the fine-tuned model
+        self.save_model()
 
     def inference(self, prompt: str) -> Dict[str, List[Tuple[str, int]]]:
-        matches = re.findall(r'([\w\s]+) vs ([\w\s]+)', prompt)
-        kn_round = re.search(r'round: ([\w\s-]+)', prompt)
-        season = re.search(r'season: (\d{4}-\d{2}-\d{2})', prompt)
-        date_str = re.search(r'date: (\d{4}-\d{2}-\d{2})', prompt)
-        teams = [team for match in matches for team in match]
+        matches, kn_round, season, date_str, teams = self.fantasy_dataset.parse_prompt(prompt)
 
         if not self.conf.inference.vanilla:
             prompt = self.combine_with_rag(prompt, teams, date_str, season)
 
+        if self.peft_method == 'lora' and not hasattr(self, 'merged_model'):
+            merged_model = self.model.merge_and_unload()
+            model_for_inference = merged_model
+        else:
+            model_for_inference = self.model
+
         inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True,
                                 max_length=self.max_length)
-        outputs = self.model.generate(
+        outputs = model_for_inference.generate(
             **inputs,
             max_length=self.max_length,
             num_return_sequences=1,
@@ -342,34 +375,56 @@ class FantasyModel:
         return team
 
     @classmethod
-    def load_from_checkpoint(cls, path):
-        config = torch.load(f"{path}/config.pt")
+    def load_from_checkpoint(cls, model_dir):
+        config = torch.load(f"{model_dir}/config.pt")
 
         # Create an instance of FantasyModel
         instance = cls(config)
 
         # Load the tokenizer
-        instance.tokenizer = AutoTokenizer.from_pretrained(f"{path}/tokenizer")
+        instance.tokenizer = AutoTokenizer.from_pretrained(f"{model_dir}/tokenizer")
+
+        # Load the PEFT method used
+        with open(f"{model_dir}/peft_method.txt", "r") as f:
+            peft_method = f.read().strip()
 
         # Load the model
-        instance.model = AutoModelForCausalLM.from_pretrained(f"{path}/model")
+        if peft_method == 'all':
+            model = AutoModelForCausalLM.from_pretrained(f"{model_dir}/model")
+        else:
+            # Load the base model
+            base_model = AutoModelForCausalLM.from_pretrained(f"{model_dir}/base_model")
+            # Load the PEFT adapters
+            model = PeftModel.from_pretrained(base_model, f"{model_dir}/peft_model")
 
-        # Load other attributes if necessary
-        state_dict = torch.load(f"{path}/state_dict.pt")
-        instance.__dict__.update(state_dict)
+        instance.model = model
+        instance.peft_method = peft_method
 
         return instance
 
-    def save_checkpoint(self, path):
+    def save_model(self):
         # Save the configuration
-        torch.save(self.conf, f"{path}/config.pt")
+        torch.save(self.conf, f"{self.out_dir}/config.pt")
 
         # Save the tokenizer
-        self.tokenizer.save_pretrained(f"{path}/tokenizer")
+        self.tokenizer.save_pretrained(f"{self.out_dir}/tokenizer")
 
         # Save the model
-        self.model.save_pretrained(f"{path}/model")
+        if self.peft_method == 'all':
+            # For full fine-tuning, save the entire model
+            self.model.save_pretrained(f"{self.out_dir}/model")
 
-        # Save other attributes if necessary
-        state_dict = {k: v for k, v in self.__dict__.items() if k not in ['model', 'tokenizer', 'conf']}
-        torch.save(state_dict, f"{path}/state_dict.pt")
+        elif isinstance(self.model, PeftModel):
+            # For PEFT methods (LoRA, Prefix Tuning, etc.)
+            # Save the base model
+            self.model.base_model.save_pretrained(f"{self.out_dir}/base_model")
+            # Save the PEFT adapters
+            self.model.save_pretrained(f"{self.out_dir}/peft_model")
+        else:
+            raise ValueError(f"Unexpected model type for peft_method: {self.peft_method}")
+
+        # Save the PEFT method used
+        with open(f"{self.out_dir}/peft_method.txt", "w") as f:
+            f.write(self.peft_method)
+
+        print(f"Checkpoint saved to {self.out_dir}")

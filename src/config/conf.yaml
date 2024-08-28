@@ -39,18 +39,16 @@ model:
 train:
   num_epochs: 5
   batch_size: 16
-  gradient_accumulation_steps: 1
-  optim: 'paged_adamw_32bit'
-  save_steps: 1000
-  logging_steps: 1000
+  peft_method: 'all'
+  evaluation_steps: 100
   learning_rate: 2e-4
   weight_decay: 0.001
   out_dir: 'results'
 
 peft:
   method: 'lora'
-  r: 64
-  lora_a: 16
+  r: 16
+  lora_alpha: 32
   target_modules: ['query_key_value']
   dropout: 0.1
 

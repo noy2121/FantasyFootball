@@ -41,19 +41,25 @@ class FantasyDataset:
         with open(file_path, 'r') as f:
             for line in f:
                 sample_id, sample = json.loads(line).popitem()
-                parsed_sample = self._parse_sample(sample)
+                parsed_sample = self._process_prompt(sample)
                 parsed_sample['sample_id'] = sample_id
                 data.append(parsed_sample)
             return pd.DataFrame(data)
 
-    def _parse_sample(self, sample: str) -> Dict[str, List[str]]:
+    @staticmethod
+    def parse_prompt(prompt: str) -> Tuple[List[str], str, str, str, List[str]]:
 
-        matches = re.findall(r'([\w\s]+) vs ([\w\s]+)', sample)
-        kn_round = re.search(r'round: ([\w\s-]+)', sample)
-        season = re.search(r'season: (\d{4}-\d{2}-\d{2})', sample)
-        date_str = re.search(r'date: (\d{4}-\d{2}-\d{2})', sample)
+        matches = re.findall(r'([\w\s]+) vs ([\w\s]+)', prompt)
+        kn_round = re.search(r'round: ([\w\s-]+)', prompt)
+        season = re.search(r'season: (\d{4}-\d{2}-\d{2})', prompt)
+        date_str = re.search(r'date: (\d{4}-\d{2}-\d{2})', prompt)
         teams = [team for match in matches for team in match]
 
+        return matches, kn_round, season, date_str, teams
+
+    def _process_prompt(self, prompt: str) -> Dict[str, List[str]]:
+
+        matches, kn_round, season, date_str, teams = self.parse_prompt(prompt)
         valid, msg = self.validate_sample(matches, kn_round, date_str)
         if not valid:
             raise ValueError(f'{msg}')
@@ -64,7 +70,7 @@ class FantasyDataset:
             'round': kn_round,
             'season': season,
             'date': date_str,
-            'text': sample  # Keep the original text for tokenization
+            'text': prompt  # Keep the original text for tokenization
         }
 
     def validate_sample(self, matches, kn_round, date_str):

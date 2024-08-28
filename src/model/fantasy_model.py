@@ -314,6 +314,9 @@ class FantasyModel:
 
         trainer.train()
 
+        # save model
+        self.save_checkpoint()
+
     def inference(self, prompt: str) -> Dict[str, List[Tuple[str, int]]]:
         matches = re.findall(r'([\w\s]+) vs ([\w\s]+)', prompt)
         kn_round = re.search(r'round: ([\w\s-]+)', prompt)
@@ -337,3 +340,36 @@ class FantasyModel:
 
         team, budget_used = self.decode_team(outputs[0])
         return team
+
+    @classmethod
+    def load_from_checkpoint(cls, path):
+        config = torch.load(f"{path}/config.pt")
+
+        # Create an instance of FantasyModel
+        instance = cls(config)
+
+        # Load the tokenizer
+        instance.tokenizer = AutoTokenizer.from_pretrained(f"{path}/tokenizer")
+
+        # Load the model
+        instance.model = AutoModelForCausalLM.from_pretrained(f"{path}/model")
+
+        # Load other attributes if necessary
+        state_dict = torch.load(f"{path}/state_dict.pt")
+        instance.__dict__.update(state_dict)
+
+        return instance
+
+    def save_checkpoint(self, path):
+        # Save the configuration
+        torch.save(self.conf, f"{path}/config.pt")
+
+        # Save the tokenizer
+        self.tokenizer.save_pretrained(f"{path}/tokenizer")
+
+        # Save the model
+        self.model.save_pretrained(f"{path}/model")
+
+        # Save other attributes if necessary
+        state_dict = {k: v for k, v in self.__dict__.items() if k not in ['model', 'tokenizer', 'conf']}
+        torch.save(state_dict, f"{path}/state_dict.pt")

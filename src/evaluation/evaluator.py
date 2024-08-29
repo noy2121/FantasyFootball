@@ -11,7 +11,7 @@ from src.evaluation.visualization import FantasyVisualizer
 from src.model.fantasy_model import FantasyModel
 from src.model.fantasy_dataset import FantasyDataset
 from src.model.fantasy_data_collator import FantasyTeamDataCollator
-from src.model.rag_dataset import SeasonSpecificRAG
+from src.model.fantasy_rag import SeasonSpecificRAG
 
 
 class FantasyEvaluator:

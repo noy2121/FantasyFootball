@@ -8,11 +8,11 @@ from transformers import EarlyStoppingCallback
 from peft import PeftModel, get_peft_model, LoraConfig, PrefixTuningConfig, TaskType
 from peft.utils.other import TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING as LoRA_MODULES_MAPPING
 
-from rag_dataset import SeasonSpecificRAG
-from fantasy_dataset import FantasyDataset
-from fantasy_data_collator import FantasyTeamDataCollator
-from fantasy_loss import FantasyTeamLoss
-from fantasy_stats import DataStatsCache
+from .fantasy_rag import SeasonSpecificRAG
+from .fantasy_dataset import FantasyDataset
+from .fantasy_data_collator import FantasyTeamDataCollator
+from .fantasy_loss import FantasyTeamLoss
+from .fantasy_stats import DataStatsCache
 
 
 class FantasyModel:

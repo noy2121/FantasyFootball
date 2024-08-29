@@ -9,7 +9,7 @@ class FantasyTeamLoss(torch.nn.Module):
         super().__init__()
         self.tokenizer = tokenizer
 
-    def forward(self, logits: torch.T, input_ids: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, logits: torch.Tensor, input_ids: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         # Standard language modeling loss
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = input_ids[..., 1:].contiguous()

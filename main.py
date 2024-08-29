@@ -5,7 +5,7 @@ import torch
 from typing import List, Dict, Tuple
 from omegaconf import DictConfig, OmegaConf
 from src.model.fantasy_model import FantasyModel
-from src.model.rag_dataset import SeasonSpecificRAG
+from src.model.fantasy_rag import SeasonSpecificRAG
 
 
 def get_user_input():
@@ -55,12 +55,12 @@ def print_team(team: Dict[str, List[Tuple[str, int]]]):
     print(f"\nTotal Cost: {total_cost}M")
 
 
-@hydra.main(config_path="src/confing", config_name="conf")
+@hydra.main(config_path="src/config", config_name="conf")
 def main(cfg: DictConfig):
     print("Configuration:")
     print(OmegaConf.to_yaml(cfg))
-    print("\nOverrides:")
-    print(OmegaConf.to_yaml(cfg.overrides))
+    #print("\nOverrides:")
+    #print(OmegaConf.to_yaml(cfg.overrides))
 
     mode = cfg.mode
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -81,6 +81,7 @@ def main(cfg: DictConfig):
         print_team(result)
 
     elif mode == "build_rag":
+        print("Start building RAG dataset")
         rag_system = SeasonSpecificRAG(cfg.rag, device)
         rag_system.prepare_rag_data()
         rag_system.build_indices()

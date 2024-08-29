@@ -17,8 +17,8 @@ from omegaconf import DictConfig, OmegaConf
 from multiprocessing import Pool, cpu_count
 from sentence_transformers import SentenceTransformer
 
-from system_prompts import player_entry_format, club_entry_format
-from utils.utils import load_dataframes, ROOT_DIR, get_hftoken
+from ..system_prompts import player_entry_format, club_entry_format
+from ..utils.utils import load_dataframes, ROOT_DIR, get_hftoken
 
 
 class DataFrameUtils:
@@ -194,7 +194,7 @@ class SeasonSpecificRAG:
 
     def __init__(self, cfg: DictConfig, data_dir: str, device: str = 'cpu'):
 
-        self.data_dir = cfg.data_dir
+        self.data_dir = cfg.rag_dir
         self.embedding_model_name = cfg.embedding_model_name
         self.device = device
 

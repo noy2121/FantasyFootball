@@ -1,14 +1,13 @@
 import re
 import torch
-from transformers import DataCollator
 
-from rag_dataset import SeasonSpecificRAG
-from system_prompts import instruction_prompt, short_rules_prompt, full_rules_prompt
+from .fantasy_rag import SeasonSpecificRAG
+from ..system_prompts import instruction_prompt, short_rules_prompt, full_rules_prompt
 
 
-class FantasyTeamDataCollator(DataCollator):
+class FantasyTeamDataCollator:
     def __init__(self, tokenizer, rag_retriever: SeasonSpecificRAG, max_length: int, eval_steps: int):
-        super().__init__()
+
         self.tokenizer = tokenizer
         self.rag_retriever = rag_retriever
         self.max_length = max_length

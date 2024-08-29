@@ -12,6 +12,7 @@ mode: fine_tune
 
 rag:
   rag_dir: 'data/rag'
+  csvs_dir: 'data/csvs'
   estimation_data_dir: 'data/team_estimation_data'
   generate_jsons: False
   embedding_model_name: 'all-MiniLM-L6-v2'

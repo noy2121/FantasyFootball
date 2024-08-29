@@ -84,11 +84,11 @@ class StatsProcessor:
             is_cl = game['competition_type'] == 'champions_league'
             is_dl = 'domestic' in game['competition_type']
 
-            assert home_id not in club_stats and away_id not in club_stats, \
-                f"Neither home club {home_id} nor away club {away_id} found in club_stats"
+            assert (home_id in club_stats) or (away_id in club_stats), \
+                f"Neither home club {home_id} nor away club {away_id} found in club_stats for game id {game['game_id']}"
 
             if not is_dl and not is_cl:
-                return
+                continue
 
             for cid, is_home in [(home_id, True), (away_id, False)]:
                 if cid not in club_stats:
@@ -160,17 +160,12 @@ class SentenceEncoder:
         self.model = self._load_embedding_model(model_name)
         self.num_processes = max(1, cpu_count() - 1)
 
-    def encode(self, texts, season, batch_size=64):
+    def encode(self, texts, season, etype, batch_size=64):
         batches = [texts[i: i + batch_size] for i in range(0, len(texts), batch_size)]
-        inputs = [(self.model, batch) for batch in batches]
-        with Pool(self.num_processes) as pool:
-            results = list(
-                pool.starmap(self.encode_batch, tqdm(inputs,
-                                                     file=sys.stdout,
-                                                     total=len(inputs),
-                                                     colour='WHITE',
-                                                     desc=f'Encoding {season} Data'))
-            )
+        results = []
+        for batch in tqdm(batches, file=sys.stdout, total=len(batches), colour='WHITE',
+                          desc=f'Encoding {season} {etype.capitalize()} Data'):
+            results.append(self.encode_batch(batch))
 
         return np.vstack(results)
 
@@ -192,15 +187,16 @@ class SeasonSpecificRAG:
     club_entry_format = club_entry_format
     player_entry_format = player_entry_format
 
-    def __init__(self, cfg: DictConfig, data_dir: str, device: str = 'cpu'):
+    def __init__(self, cfg: DictConfig, device: str = 'cpu'):
 
         self.data_dir = cfg.rag_dir
+        self.csvs_dir = cfg.csvs_dir
         self.embedding_model_name = cfg.embedding_model_name
         self.device = device
 
         self.indices = {}
         self.rag_data = {}
-        self.dataframes = load_dataframes(data_dir)
+        self.dataframes = load_dataframes(self.csvs_dir)
 
         self.encoder = SentenceEncoder(self.embedding_model_name)
         self.dataframe_util = DataFrameUtils()
@@ -216,6 +212,9 @@ class SeasonSpecificRAG:
 
         seasons = sorted(set(games_df['date'].dt.strftime('%Y')))
         for season in seasons:
+            if season in ['2017', '2024']:  # ignore 2017 and 2025 seasons
+                continue
+            self.rag_data[season] = {}
             self._process_season_data(season, players_df, clubs_df, games_df, events_df, lineups_df)
 
     def _get_dataframes(self):
@@ -224,7 +223,6 @@ class SeasonSpecificRAG:
 
     def _process_season_data(self, season: str, players_df: pd.DataFrame, clubs_df: pd.DataFrame,
                              games_df: pd.DataFrame, events_df: pd.DataFrame, lineups_df: pd.DataFrame):
-
         season_start = datetime(int(season), 8, 10)
         season_end = datetime(int(season) + 1, 6, 20)
         decision_points = self._generate_decision_points(season_start, season_end)
@@ -236,7 +234,9 @@ class SeasonSpecificRAG:
         clubs_stats = self.stats_processor.initialize_clubs_stats()
         players_stats = self.stats_processor.initialize_players_stats(season)
 
-        rag_entries = []
+        clubs_entries = []
+        players_entries = []
+        seen_entries = set()
         player_infer_data = {}
         club_infer_data = {}
         prev_dec_date = season_start
@@ -249,8 +249,20 @@ class SeasonSpecificRAG:
             self.stats_processor.update_club_stats(clubs_stats, curr_games)
             self.stats_processor.update_player_stats(players_stats, curr_events, curr_lineups)
 
-            rag_entries.extend(self._prepare_club_entries(clubs_df, clubs_stats))
-            rag_entries.extend(self._prepare_player_entries(players_df, players_stats))
+            # Deduplicate club entries
+            for club_entry in self._prepare_club_entries(clubs_df, clubs_stats):
+                entry_key = (decision_date, club_entry)
+                if entry_key not in seen_entries:
+                    clubs_entries.append((club_entry, decision_date.strftime('%Y-%m-%d')))
+                    seen_entries.add(entry_key)
+
+            # Deduplicate player entries
+            for player_entry in self._prepare_player_entries(players_df, players_stats):
+                entry_key = (decision_date, player_entry)
+                if entry_key not in seen_entries:
+                    players_entries.append((player_entry, decision_date.strftime('%Y-%m-%d')))
+                    seen_entries.add(entry_key)
+
             prev_dec_date = decision_date
 
             # this is for the jsons data
@@ -258,12 +270,13 @@ class SeasonSpecificRAG:
                 player_infer_data[str(decision_date.date())] = players_stats
                 club_infer_data[str(decision_date.date())] = clubs_stats
 
-        assert len(rag_entries) == len(decision_points[1:]) * (len(clubs_df) + len(players_df)), \
-            f'Number of rag_entries is different than number of date!!!'
-
-        self.rag_data[season] = Dataset.from_dict({
-            "text": rag_entries,
-            "date": [d.strftime('%Y-%m-%d') for d in decision_points[1:]] * (len(clubs_df) + len(players_df))
+        self.rag_data[season]['clubs'] = Dataset.from_dict({
+            "text": [entry[0] for entry in clubs_entries],
+            "date": [entry[1] for entry in clubs_entries]
+        })
+        self.rag_data[season]['players'] = Dataset.from_dict({
+            "text": [entry[0] for entry in players_entries],
+            "date": [entry[1] for entry in players_entries]
         })
 
         if self.generate_jsons and season == '2023':
@@ -321,24 +334,27 @@ class SeasonSpecificRAG:
 
     def build_indices(self, batch_size=64):
         print('Building RAG indices...')
-        for season, dataset in self.rag_data.items():
-            texts = dataset['text']
-            embeddings = self.encoder.encode(texts, season, batch_size)
+        for season, datasets in self.rag_data.items():
+            self.indices[season] = {}
+            for entry_type, dataset in datasets.items():
+                texts = dataset['text']
+                embeddings = self.encoder.encode(texts, season, entry_type, batch_size)
 
-            # TODO: add gpu option
-            index = faiss.IndexFlatL2(embeddings.shape[1])
-            index.add(embeddings.astype('float32'))
-            self.indices[season] = index
+                index = faiss.IndexFlatL2(embeddings.shape[1])
+                index.add(embeddings.astype('float32'))
+                self.indices[season][entry_type] = index
             print(f"Index built for season {season}")
 
-    def save(self, output_dir: str):
+    def save(self):
         print('Saving RAG dataset...')
-        os.makedirs(output_dir, exist_ok=True)
-        for season, dataset in self.rag_data.items():
-            dataset.save_to_disk(os.path.join(output_dir, f'rag_dataset_{season}'))
-            faiss.write_index(self.indices[season], os.path.join(output_dir, f'rag_index_{season}.faiss'))
-        self.encoder.save(os.path.join(output_dir, 'embedding_model'))
-        with open(os.path.join(output_dir, 'seasons.txt'), 'w') as f:
+        os.makedirs(self.data_dir, exist_ok=True)
+        for season, datasets in self.rag_data.items():
+            for entry_type, dataset in datasets.items():
+                out_dir = os.path.join(self.data_dir, f'rag_dataset_{season}')
+                dataset.save_to_disk(f'{out_dir}/{entry_type}')
+                faiss.write_index(self.indices[season][entry_type], f'{out_dir}/rag_index_{entry_type}.faiss')
+        self.encoder.save(os.path.join(self.data_dir, 'embedding_model'))
+        with open(os.path.join(self.data_dir, 'seasons.txt'), 'w') as f:
             f.write('\n'.join(self.rag_data.keys()))
 
     @classmethod
@@ -347,55 +363,79 @@ class SeasonSpecificRAG:
         instance.encoder = SentenceTransformer(os.path.join(input_dir, 'embedding_model'))
         with open(os.path.join(input_dir, 'seasons.txt'), 'r') as f:
             seasons = [line.strip() for line in f]
-        instance.rag_data = {season: Dataset.load_from_disk(os.path.join(input_dir, f'rag_dataset_{season}')) for season
-                             in seasons}
-        instance.indices = {season: faiss.read_index(os.path.join(input_dir, f'rag_index_{season}.faiss')) for season in
-                            seasons}
+
+        instance.rag_data = {}
+        instance.indices = {}
+        for season in seasons:
+            instance.rag_data[season] = {}
+            instance.indices[season] = {}
+            dirpath = os.path.join(input_dir, f'rag_dataset_{season}')
+            for entry_type in ["clubs", "players"]:
+                instance.rag_data[season][entry_type] = Dataset.load_from_disk(f'{dirpath}/{entry_type}')
+                instance.indices[season][entry_type] = faiss.read_index(f'{dirpath}/rag_index_{entry_type}.faiss')
+
         return instance
 
-    def retrieve_relevant_info(self, teams: List[str], date: str, season: str, k: int = 5) -> Dict[str, List[str]]:
+    def retrieve_relevant_info(self, teams: List[str], date: str, season: str, k: int = 50) -> Dict[str, List[str]]:
         if season not in self.indices:
             raise ValueError(f"No data available for season {season}")
 
         query_date = datetime.strptime(date, '%Y-%m-%d')
-        decision_points = [datetime.strptime(d, '%Y-%m-%d') for d in set(self.rag_data[season]['date'])]
-        decision_points.sort()
+        decision_points = np.array([datetime.strptime(d, '%Y-%m-%d') for d in set(self.rag_data[season]['clubs']['date'])])
+        decision_points = np.sort(decision_points)
 
         # find nearest decision point
-        idx = bisect.bisect_left(decision_points, query_date)
-        if idx == len(decision_points):
-            idx -= 1
+        idx = np.searchsorted(decision_points, query_date, side='left')
+        if idx >= len(decision_points):
+            idx = len(decision_points) - 1
         elif idx > 0 and query_date - decision_points[idx - 1] < decision_points[idx] - query_date:
             idx -= 1
 
-        # filter the dataset to include only entries up to the nearest decision point
         nearest_decision_point = decision_points[idx].strftime('%Y-%m-%d')
-        valid_indices = [i for i, d in enumerate(self.rag_data[season]['date']) if d <= nearest_decision_point]
+        clubs_valid_indices = np.where(np.array(self.rag_data[season]['clubs']['date']) == nearest_decision_point)[0]
+        players_valid_indices = np.where(np.array(self.rag_data[season]['players']['date']) == nearest_decision_point)[0]
 
         relevant_info = {
             "teams": [],
             "players": []
         }
 
-        # Dual Query System: Retrieve both team-level and player-level data
         for team in teams:
-            # Team-level query
-            team_query = f"{team} team performance {season}"
-            team_query_embedding = self.encoder.encode_batch([team_query])
-            _, team_indices = self.indices[season].search(team_query_embedding.astype('float32'), k)
+            # Encode queries once and reuse
+            team_query_embedding = self.encoder.encode([f"{team} team performance {season}"]).astype('float32')
+            player_query_embedding = self.encoder.encode([f"{team} player stats {season}"]).astype('float32')
 
-            # Filter the team results to include only valid indices
-            filtered_team_indices = [i for i in team_indices[0] if i in valid_indices]
-            relevant_info["teams"].extend([self.rag_data[season]['text'][i] for i in filtered_team_indices[:k]])
+            # Perform team-level search
+            _, team_indices = self.indices[season]['clubs'].search(team_query_embedding, k)
+            team_indices = np.intersect1d(team_indices[0], clubs_valid_indices, assume_unique=True)
+            team_info = [self.rag_data[season]['clubs']['text'][i] for i in team_indices[:k]]
+            relevant_info["teams"].extend(team_info)
 
-            # Player-level query for each player in the team
-            player_query = f"{team} player stats {season}"
-            player_query_embedding = self.encoder.encode_batch([player_query])
-            _, player_indices = self.indices[season].search(player_query_embedding.astype('float32'), k)
+            # Perform player-level search
+            _, player_indices = self.indices[season]['players'].search(player_query_embedding, k * 10)
+            player_indices = np.intersect1d(player_indices[0], players_valid_indices, assume_unique=True)
 
-            # Filter the player results to include only valid indices
-            filtered_player_indices = [i for i in player_indices[0] if i in valid_indices]
-            relevant_info["players"].extend([self.rag_data[season]['text'][i] for i in filtered_player_indices[:k]])
+            # Pre-filter player text data to avoid unnecessary loops
+            filtered_player_info = []
+            seen_players = set()
+
+            for i in player_indices:
+                player_text = self.rag_data[season]['players']['text'][i]
+                player_lines = player_text.split('\n')
+                if len(player_lines) < 2:
+                    continue
+
+                player_name = player_lines[0].split(': ')[-1]
+                player_team = player_lines[2].split(': ')[-1]
+
+                if player_name not in seen_players and player_team == team:
+                    filtered_player_info.append(player_text)
+                    seen_players.add(player_name)
+
+                if len(filtered_player_info) >= k:
+                    break
+
+            relevant_info["players"].extend(filtered_player_info)
 
         return relevant_info
 

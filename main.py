@@ -85,7 +85,7 @@ def main(cfg: DictConfig):
         rag_system = SeasonSpecificRAG(cfg.rag, device)
         rag_system.prepare_rag_data()
         rag_system.build_indices()
-        rag_system.save(cfg.data.rag_dir)
+        rag_system.save()
 
     else:
         raise ValueError(f"Invalid mode: {mode}")

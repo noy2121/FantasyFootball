@@ -3,18 +3,16 @@ import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 import sys
 import json
+from typing import List, Dict
+from functools import lru_cache
+from datetime import datetime, timedelta
 
 import faiss
-import bisect
-import torch
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
-from datetime import datetime, timedelta
-from typing import List, Dict
 from datasets import Dataset
 from omegaconf import DictConfig, OmegaConf
-from multiprocessing import Pool, cpu_count
 from sentence_transformers import SentenceTransformer
 
 from ..system_prompts import player_entry_format, club_entry_format
@@ -158,7 +156,6 @@ class StatsProcessor:
 class SentenceEncoder:
     def __init__(self, model_name: str):
         self.model = self._load_embedding_model(model_name)
-        self.num_processes = max(1, cpu_count() - 1)
 
     def encode(self, texts, season, etype, batch_size=64):
         batches = [texts[i: i + batch_size] for i in range(0, len(texts), batch_size)]
@@ -196,6 +193,8 @@ class SeasonSpecificRAG:
 
         self.indices = {}
         self.rag_data = {}
+        self.cached_club_data = {}
+        self.cached_player_data = {}
         self.dataframes = load_dataframes(self.csvs_dir)
 
         self.encoder = SentenceEncoder(self.embedding_model_name)
@@ -357,6 +356,14 @@ class SeasonSpecificRAG:
         with open(os.path.join(self.data_dir, 'seasons.txt'), 'w') as f:
             f.write('\n'.join(self.rag_data.keys()))
 
+    @lru_cache(maxsize=None)
+    def get_cached_club_data(self, season, index):
+        return self.cached_club_data[season][index]
+
+    @lru_cache(maxsize=None)
+    def get_cached_player_data(self, season, index):
+        return self.cached_player_data[season][index]
+
     @classmethod
     def load(cls, input_dir: str):
         instance = cls.__new__(cls)
@@ -366,13 +373,21 @@ class SeasonSpecificRAG:
 
         instance.rag_data = {}
         instance.indices = {}
+        instance.cached_club_data = {}
+        instance.cached_player_data = {}
+
         for season in seasons:
             instance.rag_data[season] = {}
             instance.indices[season] = {}
             dirpath = os.path.join(input_dir, f'rag_dataset_{season}')
             for entry_type in ["clubs", "players"]:
+                # load dataset and FAISS index
                 instance.rag_data[season][entry_type] = Dataset.load_from_disk(f'{dirpath}/{entry_type}')
                 instance.indices[season][entry_type] = faiss.read_index(f'{dirpath}/rag_index_{entry_type}.faiss')
+
+            # cache club and player data to avoid repetitions
+            instance.cached_club_data[season] = instance.rag_data[season]['clubs']['text']
+            instance.cached_player_data[season] = instance.rag_data[season]['players']['text']
 
         return instance
 
@@ -395,20 +410,16 @@ class SeasonSpecificRAG:
         clubs_valid_indices = np.where(np.array(self.rag_data[season]['clubs']['date']) == nearest_decision_point)[0]
         players_valid_indices = np.where(np.array(self.rag_data[season]['players']['date']) == nearest_decision_point)[0]
 
-        relevant_info = {
-            "teams": [],
-            "players": []
-        }
-
+        relevant_info = {"teams": [], "players": []}
         for team in teams:
-            # Encode queries once and reuse
+
             team_query_embedding = self.encoder.encode([f"{team} team performance {season}"]).astype('float32')
             player_query_embedding = self.encoder.encode([f"{team} player stats {season}"]).astype('float32')
 
             # Perform team-level search
             _, team_indices = self.indices[season]['clubs'].search(team_query_embedding, k)
             team_indices = np.intersect1d(team_indices[0], clubs_valid_indices, assume_unique=True)
-            team_info = [self.rag_data[season]['clubs']['text'][i] for i in team_indices[:k]]
+            team_info = [self.get_cached_club_data(season, i) for i in team_indices[:k]]
             relevant_info["teams"].extend(team_info)
 
             # Perform player-level search
@@ -420,7 +431,7 @@ class SeasonSpecificRAG:
             seen_players = set()
 
             for i in player_indices:
-                player_text = self.rag_data[season]['players']['text'][i]
+                player_text = self.get_cached_player_data(season, i)
                 player_lines = player_text.split('\n')
                 if len(player_lines) < 2:
                     continue

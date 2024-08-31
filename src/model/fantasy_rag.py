@@ -3,7 +3,7 @@ import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 import sys
 import json
-from typing import List, Dict
+from typing import List, Dict, Any
 from functools import lru_cache
 from datetime import datetime, timedelta
 
@@ -19,7 +19,7 @@ from ..system_prompts import player_entry_format, club_entry_format
 from ..utils.utils import load_dataframes, ROOT_DIR, get_hftoken
 
 
-class DataFrameUtils:
+class DataFilterUtils:
     @staticmethod
     def filter_and_sort_by_date(df: pd.DataFrame, start: datetime, end: datetime) -> pd.DataFrame:
         return df.loc[(df['date'] >= start) & (df['date'] < end)].sort_values('date')
@@ -192,13 +192,18 @@ class SeasonSpecificRAG:
         self.device = device
 
         self.indices = {}
+        self.seasons = []
         self.rag_data = {}
         self.cached_club_data = {}
         self.cached_player_data = {}
+        self.season_start_date = '08-10'
+        self.season_end_date = '06-20'
+        self.decision_points = self._generate_decision_points()
+
         self.dataframes = load_dataframes(self.csvs_dir)
 
         self.encoder = SentenceEncoder(self.embedding_model_name)
-        self.dataframe_util = DataFrameUtils()
+        self.dataframe_util = DataFilterUtils()
         self.stats_processor = StatsProcessor(self.dataframes['players'], self.dataframes['clubs'])
         self.generate_jsons = cfg.generate_jsons
         self.jsons_out_dir = cfg.estimation_data_dir
@@ -209,8 +214,9 @@ class SeasonSpecificRAG:
         for df in [games_df, events_df, lineups_df]:
             df['date'] = pd.to_datetime(df['date'])
 
-        seasons = sorted(set(games_df['date'].dt.strftime('%Y')))
-        for season in seasons:
+        self.seasons = sorted(set(games_df['date'].dt.strftime('%Y')))
+
+        for season in self.seasons:
             if season in ['2017', '2024']:  # ignore 2017 and 2025 seasons
                 continue
             self.rag_data[season] = {}
@@ -222,9 +228,9 @@ class SeasonSpecificRAG:
 
     def _process_season_data(self, season: str, players_df: pd.DataFrame, clubs_df: pd.DataFrame,
                              games_df: pd.DataFrame, events_df: pd.DataFrame, lineups_df: pd.DataFrame):
-        season_start = datetime(int(season), 8, 10)
-        season_end = datetime(int(season) + 1, 6, 20)
-        decision_points = self._generate_decision_points(season_start, season_end)
+
+        season_start = datetime.strptime(f'{season}-{self.season_start_date}', '%Y-%m-%d')
+        season_end = datetime.strptime(f'{int(season) + 1}-{self.season_end_date}', '%Y-%m-%d')
 
         season_games = self.dataframe_util.filter_and_sort_by_date(games_df, season_start, season_end)
         season_events = self.dataframe_util.filter_and_sort_by_date(events_df, season_start, season_end)
@@ -240,7 +246,11 @@ class SeasonSpecificRAG:
         club_infer_data = {}
         prev_dec_date = season_start
         for i, decision_date in enumerate(
-                tqdm(decision_points[1:], file=sys.stdout, colour='WHITE', desc=f'Process {season} Data')):
+                tqdm(self.decision_points[1:], file=sys.stdout, colour='WHITE', desc=f'Process {season} Data')):
+            if int(decision_date.split('-')[0]) < 7:
+                decision_date = datetime.strptime(f'{int(season) + 1}-{decision_date}', '%Y-%m-%d')
+            else:
+                decision_date = datetime.strptime(f'{season}-{decision_date}', '%Y-%m-%d')
             curr_games = self.dataframe_util.filter_by_range_date(season_games, prev_dec_date, decision_date)
             curr_events = self.dataframe_util.filter_by_range_date(season_events, prev_dec_date, decision_date)
             curr_lineups = self.dataframe_util.filter_by_range_date(season_lineups, prev_dec_date, decision_date)
@@ -302,8 +312,11 @@ class SeasonSpecificRAG:
         with open(f'{self.jsons_out_dir}/clubs.json', 'w') as f:
             json.dump(clubs_stats, f, indent=True)
 
-    def _generate_decision_points(self, start: datetime, end: datetime) -> List[datetime]:
-        return [start + timedelta(days=i * 7) for i in range((end - start).days // 7)]
+    def _generate_decision_points(self) -> List[str]:
+        start = datetime.strptime(self.season_start_date, '%m-%d')
+        end = datetime.strptime(self.season_end_date, '%m-%d')
+        total_weeks = (end - start).days // 7 + 53
+        return [(start + timedelta(weeks=i)).strftime('%m-%d') for i in range(total_weeks)]
 
     def _prepare_club_entries(self, clubs_df: pd.DataFrame, club_stats: Dict[int, Dict]) -> List[str]:
         return [self.club_entry_format.format(
@@ -371,10 +384,14 @@ class SeasonSpecificRAG:
         with open(os.path.join(input_dir, 'seasons.txt'), 'r') as f:
             seasons = [line.strip() for line in f]
 
+        instance.seasons = seasons
         instance.rag_data = {}
         instance.indices = {}
         instance.cached_club_data = {}
         instance.cached_player_data = {}
+        instance.season_start_date = '08-10'
+        instance.season_end_date = '06-20'
+        instance.decision_points = instance._generate_decision_points()
 
         for season in seasons:
             instance.rag_data[season] = {}
@@ -391,62 +408,92 @@ class SeasonSpecificRAG:
 
         return instance
 
-    def retrieve_relevant_info(self, teams: List[str], date: str, season: str, k: int = 50) -> Dict[str, List[str]]:
-        if season not in self.indices:
-            raise ValueError(f"No data available for season {season}")
+    def find_nearest_decision_points(self, dates_batch: List[str]):
 
-        query_date = datetime.strptime(date, '%Y-%m-%d')
-        decision_points = np.array([datetime.strptime(d, '%Y-%m-%d') for d in set(self.rag_data[season]['clubs']['date'])])
-        decision_points = np.sort(decision_points)
+        query_dates = pd.to_datetime(dates_batch, format='%Y-%m-%d')
+        query_dates_md = query_dates.strftime('%m-%d')
+        decision_points_arr = pd.to_datetime(self.decision_points, format='%m-%d').strftime('%m-%d').to_numpy()
+        decision_points_arr = np.sort(decision_points_arr)
 
-        # find nearest decision point
-        idx = np.searchsorted(decision_points, query_date, side='left')
-        if idx >= len(decision_points):
-            idx = len(decision_points) - 1
-        elif idx > 0 and query_date - decision_points[idx - 1] < decision_points[idx] - query_date:
-            idx -= 1
+        indices = np.searchsorted(decision_points_arr, query_dates_md, side='right') - 1
+        indices = np.clip(indices, 0, len(decision_points_arr) - 1)
 
-        nearest_decision_point = decision_points[idx].strftime('%Y-%m-%d')
-        clubs_valid_indices = np.where(np.array(self.rag_data[season]['clubs']['date']) == nearest_decision_point)[0]
-        players_valid_indices = np.where(np.array(self.rag_data[season]['players']['date']) == nearest_decision_point)[0]
+        nearest_dps = decision_points_arr[indices]
+        nearest_dps = np.array(
+            [datetime.strptime(f'{d.year}-{str(md)}', '%Y-%m-%d') for d, md in zip(query_dates, nearest_dps)])
+        nearest_dps = [x.strftime('%Y-%m-%d') for x in nearest_dps]
 
-        relevant_info = {"teams": [], "players": []}
-        for team in teams:
+        assert len(dates_batch) == len(nearest_dps), "Output order doesn't match input order"
 
-            team_query_embedding = self.encoder.encode([f"{team} team performance {season}"]).astype('float32')
-            player_query_embedding = self.encoder.encode([f"{team} player stats {season}"]).astype('float32')
+        return nearest_dps
 
-            # Perform team-level search
-            _, team_indices = self.indices[season]['clubs'].search(team_query_embedding, k)
-            team_indices = np.intersect1d(team_indices[0], clubs_valid_indices, assume_unique=True)
-            team_info = [self.get_cached_club_data(season, i) for i in team_indices[:k]]
-            relevant_info["teams"].extend(team_info)
+    def retrieve_relevant_info_batch(self, teams_batch: List[List[str]], dates_batch: List[str],
+                                     seasons_batch: List[str], k: int = 200) -> List[Dict[str, List[str]]]:
 
-            # Perform player-level search
-            _, player_indices = self.indices[season]['players'].search(player_query_embedding, k * 10)
-            player_indices = np.intersect1d(player_indices[0], players_valid_indices, assume_unique=True)
+        relevant_info = [{"teams": [], "players": []} for _ in range(len(teams_batch))]
 
-            # Pre-filter player text data to avoid unnecessary loops
-            filtered_player_info = []
-            seen_players = set()
+        # get the nearest decision points for each sample
+        nearest_dps = self.find_nearest_decision_points(dates_batch)
 
-            for i in player_indices:
-                player_text = self.get_cached_player_data(season, i)
-                player_lines = player_text.split('\n')
-                if len(player_lines) < 2:
-                    continue
+        # create team and player queries
+        # the input is flattened because the encoder expect list of sequences
+        team_queries_batch = [
+            f"{team}" for teams, season in zip(teams_batch, seasons_batch) for team in teams
+        ]
+        player_queries_batch = list(set(
+            f"{team} player" for teams, season in zip(teams_batch, seasons_batch) for team in teams
+        ))
 
-                player_name = player_lines[0].split(': ')[-1]
-                player_team = player_lines[2].split(': ')[-1]
+        teams_embeddings_batch = self.encoder.encode(team_queries_batch).astype('float32')
+        player_embeddings_batch = self.encoder.encode(player_queries_batch).astype('float32')
+        cached_club_data = {}
+        cached_player_data = {}
+        batch_start = 0
+        for q_idx, (teams, season) in enumerate(zip(teams_batch, seasons_batch)):
 
-                if player_name not in seen_players and player_team == team:
-                    filtered_player_info.append(player_text)
-                    seen_players.add(player_name)
+            # handle clubs info
+            teams_set = set(teams)
+            _, teams_idxs = self.indices[season]['clubs'].search(teams_embeddings_batch[batch_start:batch_start + len(teams)], k)
+            teams_valid_idxs = np.where(np.array(self.rag_data[season]['clubs']['date']) == nearest_dps[q_idx])[0]
 
-                if len(filtered_player_info) >= k:
-                    break
+            for t_idxs in teams_idxs:
+                t_valid_idxs = set(t_idxs) & set(teams_valid_idxs)
+                for i in sorted(t_valid_idxs)[:k]:
+                    if i not in cached_club_data:
+                        cached_club_data[i] = self.get_cached_club_data(season, i)
+                    res = cached_club_data[i]
+                    team_name = res.split('\n')[0].split(': ')[1]
+                    if team_name in teams_set:
+                        relevant_info[q_idx]["teams"].append(res)
 
-            relevant_info["players"].extend(filtered_player_info)
+            # handle players info
+            _, players_idxs = self.indices[season]['players'].search(player_embeddings_batch[batch_start:batch_start + len(teams)], k * 5)
+            players_valid_idxs = np.where(np.array(self.rag_data[season]['players']['date']) == nearest_dps[q_idx])[0]
+
+            for p_idxs in players_idxs:
+                p_valid_idxs = set(p_idxs) & set(players_valid_idxs)
+                filtered_players_info = []
+                seen_players = set()
+
+                for i in p_valid_idxs:
+                    if i not in cached_player_data:
+                        cached_player_data[i] = self.get_cached_player_data(season, i)
+                    p_text = cached_player_data[i]
+                    p_lines = p_text.split('\n')
+                    if len(p_lines) < 2:
+                        continue
+
+                    p_name = p_lines[0].split(': ')[-1]
+                    p_club = p_lines[2].split(': ')[-1]
+                    if p_club not in teams:
+                        continue
+                    if p_name not in seen_players:
+                        filtered_players_info.append(p_text)
+                        seen_players.add(p_name)
+
+                    if len(filtered_players_info) >= k:
+                        break
+                relevant_info[q_idx]['players'].extend(filtered_players_info)
 
         return relevant_info
 

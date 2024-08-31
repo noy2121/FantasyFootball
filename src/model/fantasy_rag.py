@@ -427,8 +427,8 @@ class SeasonSpecificRAG:
 
         return nearest_dps
 
-    def retrieve_relevant_info_batch(self, teams_batch: List[List[str]], dates_batch: List[str],
-                                     seasons_batch: List[str], k: int = 200) -> List[Dict[str, List[str]]]:
+    def retrieve_relevant_info(self, teams_batch: List[List[str]], dates_batch: List[str],
+                               seasons_batch: List[str], k: int = 200) -> List[Dict[str, List[str]]]:
 
         relevant_info = [{"teams": [], "players": []} for _ in range(len(teams_batch))]
 
@@ -496,24 +496,3 @@ class SeasonSpecificRAG:
                 relevant_info[q_idx]['players'].extend(filtered_players_info)
 
         return relevant_info
-
-
-if __name__ == '__main__':
-    # Usage example
-    out_dir = os.path.join(ROOT_DIR, 'data/rag')
-    data_dir = os.path.join(ROOT_DIR, 'data/csvs')
-    rag_system = SeasonSpecificRAG(data_dir)
-    rag_system.prepare_rag_data()
-    rag_system.build_indices()
-    rag_system.save(out_dir)
-
-    # # Later, in your main application
-    # loaded_rag = SeasonSpecificRAG.load('path/to/save/rag/data')
-    #
-    # query = "Top scorers in the Premier League"
-    # season = "2022/2023"
-    # relevant_info = loaded_rag.retrieve_relevant_info(query, season)
-    # print(f"Relevant information for '{query}' in season {season}:")
-    # for info in relevant_info:
-    #     print(info)
-    # print("\n")

@@ -22,8 +22,7 @@ class FantasyTeamDataCollator:
         dates_batch = [sample['date'] for sample in batch]
         seasons_batch = [sample['season'] for sample in batch]
 
-        # TODO: Implement this func
-        rag_info_batch = self.rag_retriever.retrieve_relevant_info_batch(teams_batch, dates_batch, seasons_batch)
+        rag_info_batch = self.rag_retriever.retrieve_relevant_info(teams_batch, dates_batch, seasons_batch)
 
         with ThreadPoolExecutor() as executor:
             processed_samples = list(executor.map(

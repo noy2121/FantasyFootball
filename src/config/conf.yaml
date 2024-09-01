@@ -20,6 +20,8 @@ rag:
 data:
   bucket: 'deep-learning-projects'
   data_dir: 'data'
+  train_filepath: 'preprocessed/train'
+  test_filepath: 'preprocessed/test'
   process_raw_data: False
   create_text_data: False
   generate_data: True
@@ -38,7 +40,7 @@ model:
   max_length: 512
 
 train:
-  num_epochs: 5
+  num_epochs: 10
   batch_size: 16
   peft_method: 'all'
   evaluation_steps: 100

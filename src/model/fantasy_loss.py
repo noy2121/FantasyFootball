@@ -20,10 +20,10 @@ class FantasyTeamLoss(torch.nn.Module):
         generated_ids = torch.argmax(logits, dim=-1)
         generated_texts = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
 
-        structure_loss = torch.tensor(
-            sum(self.structure_loss(text) for text in generated_texts),
+        structure_loss = torch.sum(torch.tensor(
+            [self.structure_loss(text) for text in generated_texts],
             device=logits.device
-        )
+        ))
 
         return lm_loss, structure_loss
 
@@ -35,7 +35,7 @@ class FantasyTeamLoss(torch.nn.Module):
             r"\tDefence: (?:.+ \(\d+M\),? ?){3,5}",
             r"\tMidfield: (?:.+ \(\d+M\),? ?){3,5}",
             r"\tAttack: (?:.+ \(\d+M\),? ?){1,3}",
-            r"Budget used: \d+M/125M"
+            r"Budget used: \d+M/\d+M"
         ]
 
         loss = 0

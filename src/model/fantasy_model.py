@@ -3,11 +3,12 @@ import torch
 import numpy as np
 from pathlib import Path
 from typing import List, Dict, Tuple
-from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments
+from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments
 from transformers import EarlyStoppingCallback
 from peft import PeftModel, get_peft_model, LoraConfig, PrefixTuningConfig, TaskType
 from peft.utils.other import TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING as LoRA_MODULES_MAPPING
 
+from .fantasy_trainer import FantasyTrainer
 from .fantasy_rag import SeasonSpecificRAG
 from .fantasy_dataset import FantasyDataset
 from .fantasy_data_collator import FantasyTeamDataCollator
@@ -39,13 +40,6 @@ class FantasyModel:
             'structure_loss': []
         }
 
-        self.model, self.tokenizer = self.create_model_and_tokenizer()
-        self.rag_retriever = SeasonSpecificRAG.load(self.rag_data_dir)
-        self.fantasy_dataset = FantasyDataset(self.data_dir, self.max_length)
-        self.data_collator = FantasyTeamDataCollator(self.tokenizer, self.rag_retriever, self.max_length, self.eval_steps)
-        self.fantasy_team_loss = FantasyTeamLoss(self.tokenizer)
-        self.data_stats_cache = DataStatsCache(self.conf.rag.estimation_data_dir)
-
         self.max_players_per_team = {
             "group stage": 2,
             "round of 16": 3,
@@ -60,18 +54,26 @@ class FantasyModel:
             "semi-final": 120,
             "final": 120
         }
-
         self.max_player_score = 100
+
+        self.model, self.tokenizer = self.create_model_and_tokenizer()
+        self.rag_retriever = SeasonSpecificRAG.load(self.rag_data_dir)
+        self.fantasy_dataset = FantasyDataset(self.conf.data, self.max_length)
+        self.data_collator = FantasyTeamDataCollator(self.tokenizer, self.rag_retriever, self.max_length, self.eval_steps)
+        self.fantasy_team_loss = FantasyTeamLoss(self.tokenizer)
+        self.data_stats_cache = DataStatsCache(self.conf.rag.estimation_data_dir)
 
         if self.peft_method != 'all':
             self.model = self.apply_peft_model()
 
     def create_model_and_tokenizer(self):
+        print('Load model and tokenizer')
         tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         model = AutoModelForCausalLM.from_pretrained(self.model_name)
         return model, tokenizer
 
     def apply_peft_model(self):
+        print(f'Apply PEFT method [{self.peft_method}] to the model')
         if self.peft_method == 'lora':
             default_target_modules = LoRA_MODULES_MAPPING.get(self.model_name, ["q_proj", "v_proj"])
             peft_config = LoraConfig(
@@ -281,37 +283,9 @@ class FantasyModel:
               f"Avg LM Loss: {avg_lm_loss:.4f}, "
               f"Avg Structure Loss: {avg_structure_loss:.4f}")
 
-    def fantasy_loss(self, outputs, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
-        self.steps += 1
-
-        # calculate loss
-        lm_loss, structure_loss = self.fantasy_team_loss(outputs.logits, batch['input_ids'])
-
-        # combine losses with updated weight
-        total_loss = lm_loss + (self.structure_weight * structure_loss)
-
-        # add L2 regularization
-        l2_lambda = 0.01  # Adjust this value as needed
-        l2_reg = sum(p.pow(2.0).sum() for p in self.model.parameters())
-        total_loss += l2_lambda * l2_reg
-
-        # update losses
-        self.losses['loss'].append(total_loss.item())
-        self.losses['lm_loss'].append(lm_loss.item())
-        self.losses['structure_loss'].append(structure_loss.item())
-
-        # log metrics every 1000 steps
-        if self.steps % self.eval_steps == 0:
-            self._log_metrics()
-
-        # decrease structure weight over time (ensure it doesn't drop below a minimum value)
-        self.structure_weight = max(self.min_structure_weight, self.structure_weight * 0.9)
-
-        return total_loss
-
     def fine_tune(self):
-        train_dataset = self.fantasy_dataset.dataset_dict('train')
-        eval_dataset = self.fantasy_dataset.dataset_dict('train')
+        train_dataset = self.fantasy_dataset.dataset_dict['train']
+        eval_dataset = self.fantasy_dataset.dataset_dict['test']
 
         early_stopping_callback = EarlyStoppingCallback(
             early_stopping_patience=5,
@@ -332,15 +306,18 @@ class FantasyModel:
             save_total_limit=10
         )
 
-        trainer = Trainer(
+        print('Begin fine-tuning the model')
+        trainer = FantasyTrainer(
             model=self.model,
             args=training_args,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             data_collator=self.data_collator,
-            compute_loss=self.fantasy_loss,
             compute_metrics=self.fantasy_metrics,
-            callbacks=[early_stopping_callback]
+            callbacks=[early_stopping_callback],
+            fantasy_team_loss=self.fantasy_team_loss,
+            initial_structure_weight=1.0,
+            min_structure_weight=0.1
         )
 
         trainer.train()

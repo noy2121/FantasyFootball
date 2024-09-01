@@ -59,6 +59,7 @@ def print_team(team: Dict[str, List[Tuple[str, int]]]):
 def main(cfg: DictConfig):
     print("Configuration:")
     print(OmegaConf.to_yaml(cfg))
+    print('')
     #print("\nOverrides:")
     #print(OmegaConf.to_yaml(cfg.overrides))
 

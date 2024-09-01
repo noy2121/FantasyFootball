@@ -3,7 +3,7 @@ import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 import sys
 import json
-from typing import List, Dict, Any
+from typing import List, Dict
 from functools import lru_cache
 from datetime import datetime, timedelta
 
@@ -379,6 +379,7 @@ class SeasonSpecificRAG:
 
     @classmethod
     def load(cls, input_dir: str):
+        print('Load RAG Dataset')
         instance = cls.__new__(cls)
         instance.encoder = SentenceTransformer(os.path.join(input_dir, 'embedding_model'))
         with open(os.path.join(input_dir, 'seasons.txt'), 'r') as f:

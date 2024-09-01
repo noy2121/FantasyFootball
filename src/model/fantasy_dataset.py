@@ -9,9 +9,19 @@ from datasets import Dataset, DatasetDict
 
 
 class FantasyDataset:
-    def __init__(self, data_dir: str, max_length: int = 512):
-        self.data_dir = data_dir
+    def __init__(self, cfg, max_length=512):
+        self.data_dir = cfg.data_dir
+        self.train_filepath = cfg.train_filepath
+        self.test_filepath = cfg.test_filepath
         self.max_length = max_length
+
+        self.matches_per_round = {
+            "final": 1,
+            "semi-final": 2,
+            "quarter-final": 4,
+            "round of 16": 8,
+            "group stage": 16
+        }
 
         # Load train and test data
         self.train_data, self.test_data = self.load_data()
@@ -22,47 +32,42 @@ class FantasyDataset:
             'test': self.prepare_dataset(self.test_data)
         })
 
-        self.matches_per_round = {
-            "final": 1,
-            "semi-final": 2,
-            "quarter-final": 4,
-            "round of 16": 8,
-            "group stage": 16
-        }
-
     def load_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        train_data = self._load_json_file('train.json')
-        test_data = self._load_json_file('test.json')
+        print('Load data for training')
+        train_data = self._load_json_file(f'{self.train_filepath}/train.json')
+        test_data = self._load_json_file(f'{self.test_filepath}/test.json')
         return train_data, test_data
 
     def _load_json_file(self, filename: str) -> pd.DataFrame:
         file_path = os.path.join(self.data_dir, filename)
         data = []
         with open(file_path, 'r') as f:
-            for line in f:
-                sample_id, sample = json.loads(line).popitem()
-                parsed_sample = self._process_prompt(sample)
+            json_data = json.load(f)
+            for sample_id, sample in json_data.items():
+                parsed_sample = self._process_prompt(sample_id, sample)
                 parsed_sample['sample_id'] = sample_id
                 data.append(parsed_sample)
             return pd.DataFrame(data)
 
     @staticmethod
-    def parse_prompt(prompt: str) -> Tuple[List[str], str, str, str, List[str]]:
+    def parse_prompt(prompt: str) -> Tuple[List[Tuple[str, str]], str, str, str, List[str]]:
 
-        matches = re.findall(r'([\w\s]+) vs ([\w\s]+)', prompt)
-        kn_round = re.search(r'round: ([\w\s-]+)', prompt)
-        season = re.search(r'season: (\d{4}-\d{2}-\d{2})', prompt)
+        matches = prompt.split("matches: [")[1].split("]")[0]
+        matches = matches.split(", ")
+        matches = [tuple(match.split(' vs ')) for match in matches]
+        kn_round = re.search(r'round: ([\w\s-]+)(?=\n|$)', prompt)
+        season = re.search(r'season: (\d{4}[-/]\d{2,4})', prompt)
         date_str = re.search(r'date: (\d{4}-\d{2}-\d{2})', prompt)
         teams = [team for match in matches for team in match]
 
-        return matches, kn_round, season, date_str, teams
+        return matches, kn_round.group(1), season.group(1), date_str.group(1), teams
 
-    def _process_prompt(self, prompt: str) -> Dict[str, List[str]]:
+    def _process_prompt(self, sample_id, prompt: str) -> Dict[str, List[str]]:
 
         matches, kn_round, season, date_str, teams = self.parse_prompt(prompt)
         valid, msg = self.validate_sample(matches, kn_round, date_str)
         if not valid:
-            raise ValueError(f'{msg}')
+            raise ValueError(f'{msg}, {sample_id=}')
 
         return {
             'matches': matches,
@@ -73,7 +78,7 @@ class FantasyDataset:
             'text': prompt  # Keep the original text for tokenization
         }
 
-    def validate_sample(self, matches, kn_round, date_str):
+    def validate_sample(self, matches: List[Tuple[str, str]], kn_round: str, date_str: str):
         knockout_round = kn_round.lower().strip()
 
         if knockout_round not in self.matches_per_round:
@@ -83,7 +88,7 @@ class FantasyDataset:
             return False, f"Number of matches ({len(matches)}) does not match the expected number for {knockout_round} ({self.matches_per_round[knockout_round]})."
 
         # Validate number of teams
-        teams = set(team for match in matches for team in match.split(' vs '))
+        teams = set(team for match in matches for team in match)
         if len(teams) != 2 * len(matches):
             return False, f"Number of unique teams ({len(teams)}) should be exactly twice the number of matches ({len(matches)})."
 

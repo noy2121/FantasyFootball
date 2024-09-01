@@ -116,7 +116,7 @@ def wrangler(cfg):
 
     if cfg.data.generate_data:
         dataframes = load_dataframes(f'{data_dir}/csvs')
-        train_samples, test_samples = generate_samples(dataframes['clubs'])
+        train_samples, test_samples = generate_samples(dataframes['clubs'], start_year)
         print("Save train/test data...")
         with open(f'{data_dir}/preprocessed/train/train.json', 'w') as f:
             json.dump(train_samples, f, indent=True)
@@ -145,5 +145,5 @@ def wrangler(cfg):
 
 
 if __name__ == '__main__':
-    set_random_seed()
+    set_random_seed(327)
     wrangler()

@@ -8,9 +8,9 @@ from unidecode import unidecode
 from datasets_structure import teams
 from src.utils.utils import ROOT_DIR
 
-
-with open(os.path.join(ROOT_DIR, 'data/club_id_name_mapping.json'), 'r') as f:
-    CLUB_IDS_DICT = json.load(f)
+#
+# with open(os.path.join(ROOT_DIR, 'data/club_id_name_mapping.json'), 'r') as f:
+#     CLUB_IDS_DICT = json.load(f)
 
 
 def fix_name_format(df: pd.DataFrame, colname: str) -> pd.DataFrame:

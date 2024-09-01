@@ -1,6 +1,6 @@
 import numpy as np
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from system_prompts import round_dates
 
@@ -51,12 +51,12 @@ def is_valid_sample(sample):
     return len(sample.split('\n')) == 4 and all(key in sample for key in ['matches:', 'round:', 'season:', 'date:'])
 
 
-def generate_samples(clubs_df, samples_per_season=1000):
+def generate_samples(clubs_df, start_year, samples_per_season=1000):
 
     # Generate samples
     train_samples = []
     test_samples = []
-    seasons = [f"{year}/{str(year + 1)[-2:]}" for year in range(2017, 2024)]
+    seasons = [f"{year}/{str(year + 1)[-2:]}" for year in range(start_year, 2024)]
     matches_in_round = {
         "Group Stage": 16,
         "Round of 16": 8,
@@ -69,11 +69,17 @@ def generate_samples(clubs_df, samples_per_season=1000):
         for _ in range(samples_per_season):
             round_name = np.random.choice(list(round_dates.keys()), p=[0.25, 0.25, 0.2, 0.2, 0.1])
             date = np.random.choice(round_dates[round_name])
+            delta = np.random.randint(-3, 4)
+
             num_matches = matches_in_round[round_name]
             if round_name == 'Group Stage':
-                date = datetime.strptime(f'{date}/{season[2:4]}', '%d/%m/%y').strftime('%Y-%m-%d')
+                date = datetime.strptime(f'{date}/{season[2:4]}', '%d/%m/%y')
+                date = date + timedelta(days=delta)
+                date.strftime('%Y-%m-%d')
             else:
-                date = datetime.strptime(f'{date}/{season[-2:]}', '%d/%m/%y').strftime('%Y-%m-%d')
+                date = datetime.strptime(f'{date}/{season[-2:]}', '%d/%m/%y')
+                date = date + timedelta(days=delta)
+                date.strftime('%Y-%m-%d')
             sample = create_sample(clubs_df, num_matches, season, round_name, date)
 
             if is_valid_sample(sample):

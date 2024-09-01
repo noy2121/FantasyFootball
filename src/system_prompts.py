@@ -16,7 +16,16 @@ sample_user_prompt = (
 instruction_prompt = (
     "You are a participant in a fantasy football league. "
     "Your task is to build a team consist of 11 players to finish as high as possible. "
-    "You must follow the rules of the game, and cannot break them."
+    "You must follow the rules of the game, and cannot break them.\n"
+    "The following is an example of the output format. Your output must have this format."
+    "<OUTPUT START>"
+    "Team:\n"
+    "\tGoalkeeper: Andriy Lunin (6M)\n"
+    "\tDefence: Matteo Darmian (6M), Federico Dimarco (7M), Joao Mario (6M)\n"
+    "\tMidfield: Jamal Musiala (12M), Dani Olmo(10M), Marcel Sabitzer(9M), Phil Foden (13M)\n"
+    "\tAttack: Bukayo Saka (14M), Erling Haaland (15M), Lamine Yamal (11M)\n"
+    "Budget used: 109M/125M"
+    "<OUTPUT START>"
 )
 
 short_rules_prompt = (

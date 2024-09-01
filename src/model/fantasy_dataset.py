@@ -1,6 +1,8 @@
 import os
 import json
 import re
+import sys
+from tqdm import tqdm
 from datetime import datetime
 import pandas as pd
 from typing import List, Dict, Tuple
@@ -33,17 +35,18 @@ class FantasyDataset:
         })
 
     def load_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        print('Load data for training')
-        train_data = self._load_json_file(f'{self.train_filepath}/train.json')
-        test_data = self._load_json_file(f'{self.test_filepath}/test.json')
+        print('\nLoad data for training')
+        train_data = self._load_json_file(f'{self.train_filepath}', 'train')
+        test_data = self._load_json_file(f'{self.test_filepath}', 'test')
         return train_data, test_data
 
-    def _load_json_file(self, filename: str) -> pd.DataFrame:
-        file_path = os.path.join(self.data_dir, filename)
+    def _load_json_file(self, filepath: str, mode: str) -> pd.DataFrame:
+        filename = os.path.join(self.data_dir, f'{filepath}/{mode}.json')
         data = []
-        with open(file_path, 'r') as f:
+        with open(filename, 'r') as f:
             json_data = json.load(f)
-            for sample_id, sample in json_data.items():
+            for sample_id, sample in tqdm(json_data.items(), file=sys.stdout, total=len(json_data), colour='WHITE',
+                                          desc=f'\tLoad {mode} data'):
                 parsed_sample = self._process_prompt(sample_id, sample)
                 parsed_sample['sample_id'] = sample_id
                 data.append(parsed_sample)

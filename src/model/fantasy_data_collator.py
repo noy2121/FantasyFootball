@@ -67,6 +67,12 @@ class FantasyTeamDataCollator:
                               f"League Rules: {full_rules_prompt}\n\n"
                               f"{combined_input}")
         self.steps += 1
+
+        ########
+        token_count = len(self.tokenizer.encode(combined_input))
+        print(token_count)
+        ########
+
         return combined_input
 
     @staticmethod

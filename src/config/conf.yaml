@@ -37,7 +37,7 @@ model:
   use_double_quant: False
   cache_dir: '.cache\huggingface'
   hf_token_filepath: 'data/keys/huggingface_token.txt'
-  max_length: 512
+  max_length: 4096
 
 train:
   num_epochs: 10

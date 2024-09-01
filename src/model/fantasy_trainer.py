@@ -7,12 +7,16 @@ from typing import Dict, Union, Any
 
 class FantasyTrainer(Trainer):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fantasy_team_loss = kwargs.pop('fantasy_team_loss')
-        self.steps = 0
+        # Extract custom arguments
+        self.fantasy_team_loss = kwargs.pop('fantasy_team_loss', None)
         self.eval_steps = kwargs.pop('eval_steps', 100)
         self.structure_weight = kwargs.pop('initial_structure_weight', 1.0)
         self.min_structure_weight = kwargs.pop('min_structure_weight', 0.1)
+
+        # Initialize Trainer with remaining arguments
+        super().__init__(*args, **kwargs)
+
+        self.steps = 0
         self.losses = {
             'loss': [],
             'lm_loss': [],

@@ -379,7 +379,7 @@ class SeasonSpecificRAG:
 
     @classmethod
     def load(cls, input_dir: str):
-        print('Load RAG Dataset')
+        print('\nLoad RAG Dataset')
         instance = cls.__new__(cls)
         instance.encoder = SentenceTransformer(os.path.join(input_dir, 'embedding_model'))
         with open(os.path.join(input_dir, 'seasons.txt'), 'r') as f:
@@ -398,7 +398,8 @@ class SeasonSpecificRAG:
             instance.rag_data[season] = {}
             instance.indices[season] = {}
             dirpath = os.path.join(input_dir, f'rag_dataset_{season}')
-            for entry_type in ["clubs", "players"]:
+            for entry_type in tqdm(["clubs", "players"], file=sys.stdout, colour='WHITE',
+                                   desc=f'\tLoad RAG data for {season=}'):
                 # load dataset and FAISS index
                 instance.rag_data[season][entry_type] = Dataset.load_from_disk(f'{dirpath}/{entry_type}')
                 instance.indices[season][entry_type] = faiss.read_index(f'{dirpath}/rag_index_{entry_type}.faiss')
@@ -451,6 +452,10 @@ class SeasonSpecificRAG:
         cached_player_data = {}
         batch_start = 0
         for q_idx, (teams, season) in enumerate(zip(teams_batch, seasons_batch)):
+
+            # if season is of the format YYYY/YY instead of YYYY
+            if '/' in season:
+                season = season.split('/')[0]
 
             # handle clubs info
             teams_set = set(teams)

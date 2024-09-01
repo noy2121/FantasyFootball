@@ -30,15 +30,9 @@ class FantasyModel:
         self.out_dir = f"{cfg.train.out_dir}/{self.model_name.split('/')[-1]}/{self.peft_method}"
         Path(self.out_dir).mkdir(parents=True, exist_ok=True)
 
-        self.steps = 0
         self.eval_steps = cfg.train.evaluation_steps
         self.structure_weight = 1
         self.min_structure_weight = 0.1
-        self.losses = {
-            'loss': [],
-            'lm_loss': [],
-            'structure_loss': []
-        }
 
         self.max_players_per_team = {
             "group stage": 2,
@@ -275,14 +269,6 @@ class FantasyModel:
             "combined_score": combined_score
         }
 
-    def _log_metrics(self):
-        avg_loss = np.mean(self.losses['loss'][-self.eval_steps:])
-        avg_lm_loss = np.mean(self.losses['lm_loss'][-self.eval_steps:])
-        avg_structure_loss = np.mean(self.losses['structure_loss'][-self.eval_steps:])
-        print(f"Step {self.steps}: Avg Loss: {avg_loss:.4f}, "
-              f"Avg LM Loss: {avg_lm_loss:.4f}, "
-              f"Avg Structure Loss: {avg_structure_loss:.4f}")
-
     def fine_tune(self):
         train_dataset = self.fantasy_dataset.dataset_dict['train']
         eval_dataset = self.fantasy_dataset.dataset_dict['test']
@@ -300,13 +286,14 @@ class FantasyModel:
             load_best_model_at_end=True,
             metric_for_best_model='combined_score',
             greater_is_better=True,
-            evaluation_strategy='steps',
+            eval_strategy='steps',
             eval_steps=self.eval_steps,
             save_steps=self.eval_steps,
-            save_total_limit=10
+            save_total_limit=10,
+            remove_unused_columns=False
         )
 
-        print('Begin fine-tuning the model')
+        print('\nBegin fine-tuning the model')
         trainer = FantasyTrainer(
             model=self.model,
             args=training_args,
@@ -316,8 +303,9 @@ class FantasyModel:
             compute_metrics=self.fantasy_metrics,
             callbacks=[early_stopping_callback],
             fantasy_team_loss=self.fantasy_team_loss,
-            initial_structure_weight=1.0,
-            min_structure_weight=0.1
+            eval_steps=self.eval_steps,
+            initial_structure_weight=self.structure_weight,
+            min_structure_weight=self.min_structure_weight
         )
 
         trainer.train()

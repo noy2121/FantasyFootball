@@ -64,6 +64,10 @@ class FantasyModel:
         print('Load model and tokenizer')
         tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         model = AutoModelForCausalLM.from_pretrained(self.model_name)
+
+        if self.conf.model.gradient_checkpointing:
+            model.gradient_checkpointing_enable()
+
         return model, tokenizer
 
     def apply_peft_model(self):
@@ -283,6 +287,7 @@ class FantasyModel:
             num_train_epochs=self.num_epochs,
             per_device_train_batch_size=self.bz,
             per_device_eval_batch_size=self.bz,
+            gradient_accumulation_steps=self.conf.train.accumulation_steps,
             load_best_model_at_end=True,
             metric_for_best_model='combined_score',
             greater_is_better=True,
@@ -290,6 +295,7 @@ class FantasyModel:
             eval_steps=self.eval_steps,
             save_steps=self.eval_steps,
             save_total_limit=10,
+            fp16=self.conf.train.mixed_precision,
             remove_unused_columns=False
         )
 

@@ -14,12 +14,14 @@ from .fantasy_dataset import FantasyDataset
 from .fantasy_data_collator import FantasyTeamDataCollator
 from .fantasy_loss import FantasyTeamLoss
 from .fantasy_stats import DataStatsCache
+from ..utils.utils import get_hftoken
 
 
 class FantasyModel:
-    def __init__(self, cfg):
+    def __init__(self, cfg, device):
 
         self.conf = cfg
+        self.device = device
         self.data_dir = cfg.data.data_dir
         self.rag_data_dir = cfg.rag.rag_dir
         self.model_name = cfg.model.model_name
@@ -61,9 +63,18 @@ class FantasyModel:
             self.model = self.apply_peft_model()
 
     def create_model_and_tokenizer(self):
-        print('Load model and tokenizer')
+        print(f'Load model and tokenizer: {self.model_name}')
+        hf_token = get_hftoken(self.conf.model.hf_token_filepath)
+
+       # load tokenizer
         tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        model = AutoModelForCausalLM.from_pretrained(self.model_name)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+            tokenizer.pad_token_id = tokenizer.eos_token_id
+
+        # load model
+        model = AutoModelForCausalLM.from_pretrained(self.model_name, token=hf_token, device_map='auto',
+                                                     torch_dtype=torch.float16, low_cpu_mem_usage=True)
 
         if self.conf.model.gradient_checkpointing:
             model.gradient_checkpointing_enable()

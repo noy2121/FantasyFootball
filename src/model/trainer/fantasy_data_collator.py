@@ -1,11 +1,8 @@
-import re
-import sys
-from typing import Dict, List, Tuple, Any
-from concurrent.futures import ThreadPoolExecutor
+from typing import Dict, List, Any
 import torch
 
-from .fantasy_rag import SeasonSpecificRAG
-from ..system_prompts import instruction_prompt, short_rules_prompt, full_rules_prompt
+from model.rag.fantasy_rag import SeasonSpecificRAG
+from system_prompts import instruction_prompt, full_rules_prompt
 
 
 class FantasyTeamDataCollator:

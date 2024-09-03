@@ -2,16 +2,15 @@ import os
 import torch
 import numpy as np
 import pandas as pd
-from typing import List, Dict
 from tqdm import tqdm
 from collections import defaultdict
 from omegaconf import DictConfig
 
 from src.evaluation.visualization import FantasyVisualizer
 from src.model.fantasy_model import FantasyModel
-from src.model.fantasy_dataset import FantasyDataset
-from src.model.fantasy_data_collator import FantasyTeamDataCollator
-from src.model.fantasy_rag import SeasonSpecificRAG
+from model.trainer.fantasy_dataset import FantasyDataset
+from model.trainer.fantasy_data_collator import FantasyTeamDataCollator
+from model.rag.fantasy_rag import SeasonSpecificRAG
 
 
 class FantasyEvaluator:

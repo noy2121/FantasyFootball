@@ -3,12 +3,27 @@ from typing import List, Dict
 
 import random
 import torch
+import json
 import numpy as np
 import pandas as pd
 from pathlib import Path
-
+from unidecode import unidecode
 
 ROOT_DIR = str(Path(__file__).parent.parent.parent.absolute())
+
+with open(f'{ROOT_DIR}/data/mappings/clubid2name.json', 'r') as f:
+    CLUB_ID2NAME_MAP = json.load(f)
+
+with open(f'{ROOT_DIR}/data/mappings/clubname2id.json', 'r') as f:
+    CLUB_NAME2ID_MAP = json.load(f)
+
+
+def get_club_name_by_club_id(idx: int) -> str:
+    return unidecode(CLUB_ID2NAME_MAP.get(str(idx), 'Unknown'))
+
+
+def get_club_id_by_club_name(name: str) -> int:
+    return CLUB_NAME2ID_MAP.get(name, None)
 
 
 def set_random_seed(seed=8):

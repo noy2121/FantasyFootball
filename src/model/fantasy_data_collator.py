@@ -1,4 +1,5 @@
 import re
+import sys
 from typing import Dict, List, Tuple, Any
 from concurrent.futures import ThreadPoolExecutor
 import torch
@@ -24,12 +25,9 @@ class FantasyTeamDataCollator:
 
         rag_info_batch = self.rag_retriever.retrieve_relevant_info(teams_batch, dates_batch, seasons_batch)
 
-        with ThreadPoolExecutor() as executor:
-            processed_samples = list(executor.map(
-                self.process_sample,
-                batch,
-                rag_info_batch
-            ))
+        processed_samples = []
+        for i, sample in enumerate(batch):
+            processed_samples.append(self.process_sample(sample, rag_info_batch[i]))
 
         processed_samples = [result for result in processed_samples if result is not None]
 
@@ -67,11 +65,6 @@ class FantasyTeamDataCollator:
                               f"League Rules: {full_rules_prompt}\n\n"
                               f"{combined_input}")
         self.steps += 1
-
-        ########
-        token_count = len(self.tokenizer.encode(combined_input))
-        print(token_count)
-        ########
 
         return combined_input
 

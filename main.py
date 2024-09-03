@@ -1,11 +1,10 @@
-import os
 import re
 import hydra
 import torch
 from typing import List, Dict, Tuple
 from omegaconf import DictConfig, OmegaConf
 from src.model.fantasy_model import FantasyModel
-from src.model.fantasy_rag import SeasonSpecificRAG
+from src.model.rag.fantasy_rag import SeasonSpecificRAG
 
 
 def get_user_input():

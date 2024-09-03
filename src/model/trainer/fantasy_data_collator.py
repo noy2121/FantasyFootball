@@ -1,8 +1,8 @@
 from typing import Dict, List, Any
 import torch
 
-from model.rag.fantasy_rag import SeasonSpecificRAG
-from system_prompts import instruction_prompt, full_rules_prompt
+from ..rag.fantasy_rag import SeasonSpecificRAG
+from ...system_prompts import instruction_prompt, full_rules_prompt
 
 
 class FantasyTeamDataCollator:

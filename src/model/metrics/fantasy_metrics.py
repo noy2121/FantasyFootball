@@ -4,20 +4,24 @@ import numpy as np
 
 
 def last_5_games_avg_score(stats):
-    goals, assists, lineups = 0, 0, 0
+    avg_score = 0
     if stats['last_5']:
         arr = np.array([(d['goals'], d['assists'], d['lineups']) for d in stats['last_5']])
         goals, assists, lineups = arr.sum(axis=0)
 
-    avg_score = ((4 * goals) + (3 * assists) + (1 * lineups)) / len(goals)
+        avg_score = ((4 * goals) + (3 * assists) + (2 * lineups)) / len(stats['last_5'])
 
-    return avg_score
+    return np.round(avg_score, 3)
 
 
 def seasonal_avg_score(player_stats, num_games):
-    return ((4 * player_stats['season']['goals'])
-            + (3 * player_stats['season']['assists'])
-            + (1 * player_stats['season']['lineups'])) / num_games
+    if num_games == 0:
+        return 0
+    avg_score = ((4 * player_stats['seasonal']['goals'])
+                 + (3 * player_stats['seasonal']['assists'])
+                 + (2 * player_stats['seasonal']['lineups'])) / num_games
+
+    return np.round(avg_score, 3)
 
 
 class FantasyMetric:

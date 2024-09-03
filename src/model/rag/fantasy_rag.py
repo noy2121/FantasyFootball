@@ -3,6 +3,7 @@ import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 import sys
 import json
+from pathlib import Path
 from typing import List, Dict
 from functools import lru_cache
 from collections import defaultdict
@@ -16,10 +17,10 @@ from datasets import Dataset
 from omegaconf import DictConfig
 from sentence_transformers import SentenceTransformer
 
-from ...utils.utils import load_dataframes, get_club_id_by_club_name
 from .rag_utility_classes import DataFilterUtils, StatsProcessor, SentenceEncoder
 from ..metrics.fantasy_metrics import last_5_games_avg_score, seasonal_avg_score
 from ...system_prompts import player_entry_format, club_entry_format
+from ...utils.utils import load_dataframes, get_club_id_by_club_name
 
 
 class SeasonSpecificRAG:
@@ -64,7 +65,6 @@ class SeasonSpecificRAG:
             if season in ['2017', '2024']:  # ignore 2017 and 2025 seasons
                 continue
             self.rag_data[season] = defaultdict(dict)
-            self.indices[season] = {}
             self._process_season_data(season, players_df, clubs_df, games_df, events_df, lineups_df)
 
     def _get_dataframes(self):
@@ -87,12 +87,12 @@ class SeasonSpecificRAG:
         player_infer_data = {}
         club_infer_data = {}
         prev_dec_date = season_start
-        for i, decision_date in enumerate(
+        for i, decision_point in enumerate(
                 tqdm(self.decision_points[1:], file=sys.stdout, colour='WHITE', desc=f'Process {season} Data')):
-            if int(decision_date.split('-')[0]) < 7:
-                decision_date = datetime.strptime(f'{int(season) + 1}-{decision_date}', '%Y-%m-%d')
+            if int(decision_point.split('-')[0]) < 7:
+                decision_date = datetime.strptime(f'{int(season) + 1}-{decision_point}', '%Y-%m-%d')
             else:
-                decision_date = datetime.strptime(f'{season}-{decision_date}', '%Y-%m-%d')
+                decision_date = datetime.strptime(f'{season}-{decision_point}', '%Y-%m-%d')
             curr_games = self.dataframe_util.filter_by_range_date(season_games, prev_dec_date, decision_date)
             curr_events = self.dataframe_util.filter_by_range_date(season_events, prev_dec_date, decision_date)
             curr_lineups = self.dataframe_util.filter_by_range_date(season_lineups, prev_dec_date, decision_date)
@@ -113,9 +113,9 @@ class SeasonSpecificRAG:
                 player_infer_data[str(decision_date.date())] = players_stats
                 club_infer_data[str(decision_date.date())] = clubs_stats
 
-            self.rag_data[season][decision_date] = {
-                'clubs': Dataset.from_dict({'text': [entry for entry in clubs_entries]}),
-                'players': Dataset.from_dict({'text': [entry for entry in players_entries]})
+            self.rag_data[season][decision_point] = {
+                'clubs': Dataset.from_dict({'text': clubs_entries}),
+                'players': Dataset.from_dict({'text': players_entries})
             }
 
         if self.generate_jsons and season == '2023':
@@ -161,7 +161,7 @@ class SeasonSpecificRAG:
         for pid in players_df['player_id']:
             for stats in [player_stats[pid]]:
                 cid = get_club_id_by_club_name(stats['club_name'])
-                num_games = clubs_stats[cid]['seasonal']['games']
+                num_games = clubs_stats[cid]['seasonal']['games'] if cid is not None else 0
                 entries.append(self.player_entry_format.format(
                     stats['name'],
                     stats['position'],
@@ -176,10 +176,13 @@ class SeasonSpecificRAG:
     def build_indices(self, batch_size=64):
         print('Building RAG indices...')
         for season, dps in self.rag_data.items():
-            for decision_point, datasets in dps.items():
+            self.indices[season] = {}
+            for i, (decision_point, datasets) in enumerate(tqdm(dps.items(), file=sys.stdout, total=len(dps),
+                                                                colour='WHITE', desc=f'Encoding {season} Data')):
+                self.indices[season][decision_point] = {}
                 for entry_type in ['clubs', 'players']:
                     texts = datasets[entry_type]['text']
-                    embeddings = self.encoder.encode(texts, season, entry_type, batch_size)
+                    embeddings = self.encoder.encode(texts, season, i, entry_type, batch_size)
                     index = faiss.IndexFlatL2(embeddings.shape[1])
                     index.add(embeddings.astype('float32'))
                     self.indices[season][decision_point][entry_type] = index
@@ -187,23 +190,24 @@ class SeasonSpecificRAG:
 
     def save(self):
         print('Saving RAG dataset...')
-        os.makedirs(self.data_dir, exist_ok=True)
-        for season, datasets in self.rag_data.items():
-            for entry_type, dataset in datasets.items():
-                out_dir = os.path.join(self.data_dir, f'rag_dataset_{season}')
-                dataset.save_to_disk(f'{out_dir}/{entry_type}')
-                faiss.write_index(self.indices[season][entry_type], f'{out_dir}/rag_index_{entry_type}.faiss')
+        for season, dps in self.rag_data.items():
+            for decision_point, datasets in dps.items():
+                for entry_type, dataset in datasets.items():
+                    out_dir = os.path.join(self.data_dir, f'rag_dataset_{season}/{decision_point}')
+                    Path(out_dir).mkdir(parents=True, exist_ok=True)
+                    dataset.save_to_disk(f'{out_dir}/{entry_type}')
+                    faiss.write_index(self.indices[season][decision_point][entry_type], f'{out_dir}/rag_index_{entry_type}.faiss')
         self.encoder.save(os.path.join(self.data_dir, 'embedding_model'))
         with open(os.path.join(self.data_dir, 'seasons.txt'), 'w') as f:
             f.write('\n'.join(self.rag_data.keys()))
 
     @lru_cache(maxsize=None)
-    def get_cached_club_data(self, season, index):
-        return self.cached_club_data[season][index]
+    def get_cached_club_data(self, season, dp, index):
+        return self.cached_club_data[season][dp][index]
 
     @lru_cache(maxsize=None)
-    def get_cached_player_data(self, season, index):
-        return self.cached_player_data[season][index]
+    def get_cached_player_data(self, season, dp, index):
+        return self.cached_player_data[season][dp][index]
 
     @classmethod
     def load(cls, input_dir: str):
@@ -225,20 +229,25 @@ class SeasonSpecificRAG:
         for season in seasons:
             instance.rag_data[season] = {}
             instance.indices[season] = {}
-            dirpath = os.path.join(input_dir, f'rag_dataset_{season}')
-            for entry_type in tqdm(["clubs", "players"], file=sys.stdout, colour='WHITE',
-                                   desc=f'\tLoad RAG data for {season=}'):
-                # load dataset and FAISS index
-                instance.rag_data[season][entry_type] = Dataset.load_from_disk(f'{dirpath}/{entry_type}')
-                instance.indices[season][entry_type] = faiss.read_index(f'{dirpath}/rag_index_{entry_type}.faiss')
+            instance.cached_club_data[season] = {}
+            instance.cached_player_data[season] = {}
+            for dp in tqdm(instance.decision_points[1:], file=sys.stdout, colour='WHITE',
+                           desc=f'\tLoad RAG data for {season=}'):
+                dirpath = os.path.join(input_dir, f'rag_dataset_{season}/{dp}')
+                instance.rag_data[season][dp] = {}
+                instance.indices[season][dp] = {}
+                for entry_type in ['clubs', 'players']:
+                    # load dataset and FAISS index
+                    instance.rag_data[season][dp][entry_type] = Dataset.load_from_disk(f'{dirpath}/{entry_type}')
+                    instance.indices[season][dp][entry_type] = faiss.read_index(f'{dirpath}/rag_index_{entry_type}.faiss')
 
-            # cache club and player data to avoid repetitions
-            instance.cached_club_data[season] = instance.rag_data[season]['clubs']['text']
-            instance.cached_player_data[season] = instance.rag_data[season]['players']['text']
+                # cache club and player data to avoid repetitions
+                instance.cached_club_data[season][dp] = instance.rag_data[season][dp]['clubs']['text']
+                instance.cached_player_data[season][dp] = instance.rag_data[season][dp]['players']['text']
 
         return instance
 
-    def find_nearest_decision_points(self, dates_batch: List[str]):
+    def find_nearest_decision_points(self, dates_batch: List[str]) -> List[str]:
 
         query_dates = pd.to_datetime(dates_batch, format='%Y-%m-%d')
         query_dates_md = query_dates.strftime('%m-%d')
@@ -251,7 +260,7 @@ class SeasonSpecificRAG:
         nearest_dps = decision_points_arr[indices]
         nearest_dps = np.array(
             [datetime.strptime(f'{d.year}-{str(md)}', '%Y-%m-%d') for d, md in zip(query_dates, nearest_dps)])
-        nearest_dps = [x.strftime('%Y-%m-%d') for x in nearest_dps]
+        nearest_dps = [x.strftime('%m-%d') for x in nearest_dps]
 
         assert len(dates_batch) == len(nearest_dps), "Output order doesn't match input order"
 
@@ -266,7 +275,7 @@ class SeasonSpecificRAG:
         return {'name': name, 'club': club, 'last_5_score': last_5_score, 'full_entry': entry}
 
     def retrieve_relevant_info(self, teams_batch: List[List[str]], dates_batch: List[str],
-                               seasons_batch: List[str], k: int = 30) -> List[Dict[str, List[str]]]:
+                               seasons_batch: List[str], k: int = 10) -> List[Dict[str, List[str]]]:
 
         relevant_info = [{"teams": [], "players": []} for _ in range(len(teams_batch))]
 
@@ -275,15 +284,11 @@ class SeasonSpecificRAG:
 
         # create team and player queries
         # the input is flattened because the encoder expect list of sequences
-        team_queries_batch = [
+        queries_batch = [
             f"{team}" for teams, season in zip(teams_batch, seasons_batch) for team in teams
         ]
-        player_queries_batch = list(set(
-            f"{team} player" for teams, season in zip(teams_batch, seasons_batch) for team in teams
-        ))
 
-        teams_embeddings_batch = self.encoder.encode(team_queries_batch).astype('float32')
-        player_embeddings_batch = self.encoder.encode(player_queries_batch).astype('float32')
+        embeddings_batch = self.encoder.encode(queries_batch).astype('float32')
         cached_club_data = {}
         cached_player_data = {}
         batch_start = 0
@@ -295,30 +300,33 @@ class SeasonSpecificRAG:
 
             # handle clubs info
             teams_set = set(teams)
-            _, teams_idxs = self.indices[season][nearest_dp]['clubs'].search(teams_embeddings_batch[batch_start:batch_start + len(teams)], k)
+            _, teams_idxs = self.indices[season][nearest_dp]['clubs'].search(embeddings_batch[batch_start:batch_start + len(teams)], k)
 
             for t_idxs in teams_idxs:
-                for i in sorted(t_idxs):
+                for i in t_idxs:
                     if i not in cached_club_data:
-                        cached_club_data[i] = self.get_cached_club_data(season, i)
+                        cached_club_data[i] = self.get_cached_club_data(season, nearest_dp, i)
                     res = cached_club_data[i]
-                    team_name = res.split('\n')[0].split(': ')[1]
+                    team_name = res.split(',')[0].split(': ')[1]
                     if team_name in teams_set:
                         relevant_info[q_idx]["teams"].append(res)
 
             # handle players info
-            _, players_idxs = self.indices[season][nearest_dp]['players'].search(player_embeddings_batch[batch_start:batch_start + len(teams)], k * 5)
+            _, players_idxs = self.indices[season][nearest_dp]['players'].search(embeddings_batch[batch_start:batch_start + len(teams)], k * 5)
 
             players_by_team = {team: [] for team in teams_set}
+            chosen_players = set()
             for p_idxs in players_idxs:
-                for i in sorted(p_idxs):
+                for i in p_idxs:
                     if i not in cached_player_data:
                         cached_player_data[i] = self.get_cached_player_data(season, nearest_dp, i)
                     player_info = cached_player_data[i]
-
                     player_entry = self.parse_player_entry(player_info)
+                    if player_entry['name'] in chosen_players:
+                        continue
                     if player_entry['club'] in teams_set:
                         players_by_team[player_entry['club']].append(player_entry)
+                        chosen_players.add(player_entry['name'])
 
             # sort players by Last 5 games average score and select the top 5 players from each team
             top_players = []

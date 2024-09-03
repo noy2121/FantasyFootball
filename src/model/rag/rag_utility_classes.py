@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from sentence_transformers import SentenceTransformer
 
-from utils.utils import ROOT_DIR, get_hftoken
+from ...utils.utils import ROOT_DIR, get_hftoken
 
 
 class DataFilterUtils:
@@ -150,11 +150,10 @@ class SentenceEncoder:
     def __init__(self, model_name: str):
         self.model = self._load_embedding_model(model_name)
 
-    def encode(self, texts, season, etype, batch_size=64):
+    def encode(self, texts, season, week, etype, batch_size=64):
         batches = [texts[i: i + batch_size] for i in range(0, len(texts), batch_size)]
         results = []
-        for batch in tqdm(batches, file=sys.stdout, total=len(batches), colour='WHITE',
-                          desc=f'Encoding {season} {etype.capitalize()} Data'):
+        for batch in batches:
             results.append(self.encode_batch(batch))
 
         return np.vstack(results)

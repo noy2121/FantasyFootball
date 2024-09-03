@@ -67,7 +67,7 @@ def main(cfg: DictConfig):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     if mode == "fine_tune":
-        model = FantasyModel(cfg)
+        model = FantasyModel(cfg, device)
         model.fine_tune()
 
     elif mode == "evaluate":

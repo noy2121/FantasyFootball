@@ -24,7 +24,9 @@ class FantasyTrainer(Trainer):
         }
 
     def compute_loss(self, model, inputs, return_outputs=False):
-        outputs = model(**inputs)
+
+        model_inputs = {k: v for k, v in inputs.items() if k in ['input_ids', 'attention_mask']}
+        outputs = model(**model_inputs)
 
         # Calculate custom loss
         lm_loss, structure_loss = self.fantasy_team_loss(outputs.logits, inputs['input_ids'])
@@ -52,6 +54,9 @@ class FantasyTrainer(Trainer):
         self.steps += 1
 
         return (total_loss, outputs) if return_outputs else total_loss
+
+    def _move_model_to_device(self, model, device):
+        pass
 
     def _log_metrics(self):
         avg_loss = np.mean(self.losses['loss'][-self.eval_steps:])

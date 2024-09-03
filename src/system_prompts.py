@@ -102,27 +102,18 @@ one_shot_example = ("Team:\n"
                     "Budget used: 109M/125M"
                     )
 
-player_entry_format = ("Player: {}\n"
-                       "Position: {}\n"
-                       "Club: {}\n"
-                       "Cost: {}\n"
-                       "Last 5 games performance:\n"
-                       "\tGoals: {}\n"
-                       "\tAssists: {}\n"
-                       "\tLineups: {}\n"
-                       "Seasonal performance:\n"
-                       "\tGoals: {}\n"
-                       "\tAssists: {}\n"
-                       "\tLineups: {}\n")
-
-club_entry_format = ("Club: {}\n"
-                     "Last 5 Champions League games performance:{}\n"
-                     "Last 5 Domestic League games performance:{}\n"
-                     "Seasonal performance:\n"
-                     "\tWins: {}\n"
-                     "\tLoses: {}\n"
-                     "\tTies: {}\n"
-                     "Champions League titles: {}\n")
+player_entry_format = ("Player: {}, "
+                       "Position: {}, "
+                       "Club: {}, "
+                       "Cost: {}, "
+                       "Last 5 games average score: {}, "
+                       "Seasonal average score: {}."
+                       )
+club_entry_format = ("Club: {}, "
+                     "Last 5 Champions League games:{}, "
+                     "Last 5 Domestic League games:{}, "
+                     "Seasonal performance: {} Wins, {} Loses, {} Ties."
+                     )
 
 round_dates = {'Group Stage': ['06/09', '13/09', '04/10', '11/10', '25/10', '01/11'],
                'Round of 16': ['14/02', '07/03'],

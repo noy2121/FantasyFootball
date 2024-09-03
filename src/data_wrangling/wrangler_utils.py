@@ -8,10 +8,6 @@ from unidecode import unidecode
 from datasets_structure import teams
 from src.utils.utils import ROOT_DIR
 
-#
-# with open(os.path.join(ROOT_DIR, 'data/club_id_name_mapping.json'), 'r') as f:
-#     CLUB_IDS_DICT = json.load(f)
-
 
 def fix_name_format(df: pd.DataFrame, colname: str) -> pd.DataFrame:
     """
@@ -27,10 +23,6 @@ def get_relevant_club_ids(df: pd.DataFrame) -> Set[int]:
     """
     # assert set(df['club_name']) == teams, f'Clubs in the DataFrame are different in {teams} !'
     return set(df['club_id'])
-
-
-def get_club_name_by_club_id(idx: int) -> str:
-    return unidecode(CLUB_IDS_DICT.get(str(idx), 'Unknown'))
 
 
 def filter_data_by_year(df: pd.DataFrame, year: int) -> pd.DataFrame:

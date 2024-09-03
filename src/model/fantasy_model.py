@@ -1,6 +1,4 @@
-import re
 import torch
-import numpy as np
 from pathlib import Path
 from typing import List, Dict, Tuple
 from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments
@@ -8,11 +6,12 @@ from transformers import EarlyStoppingCallback
 from peft import PeftModel, get_peft_model, LoraConfig, PrefixTuningConfig, TaskType
 from peft.utils.other import TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING as LoRA_MODULES_MAPPING
 
-from .fantasy_trainer import FantasyTrainer
-from .fantasy_rag import SeasonSpecificRAG
-from .fantasy_dataset import FantasyDataset
-from .fantasy_data_collator import FantasyTeamDataCollator
-from .fantasy_loss import FantasyTeamLoss
+from model.trainer.fantasy_trainer import FantasyTrainer
+from .rag.fantasy_rag import SeasonSpecificRAG
+from .metrics.fantasy_metrics import FantasyMetric
+from model.trainer.fantasy_dataset import FantasyDataset
+from model.trainer.fantasy_data_collator import FantasyTeamDataCollator
+from model.trainer.fantasy_loss import FantasyTeamLoss
 from .fantasy_stats import DataStatsCache
 from ..utils.utils import get_hftoken
 
@@ -36,28 +35,13 @@ class FantasyModel:
         self.structure_weight = 1
         self.min_structure_weight = 0.1
 
-        self.max_players_per_team = {
-            "group stage": 2,
-            "round of 16": 3,
-            "quarter-final": 4,
-            "semi-final": 6,
-            "final": 8
-        }
-        self.max_budget_per_round = {
-            "group stage": 100,
-            "round of 16": 110,
-            "quarter-final": 110,
-            "semi-final": 120,
-            "final": 120
-        }
-        self.max_player_score = 100
-
         self.model, self.tokenizer = self.create_model_and_tokenizer()
         self.rag_retriever = SeasonSpecificRAG.load(self.rag_data_dir)
         self.fantasy_dataset = FantasyDataset(self.conf.data, self.max_length)
         self.data_collator = FantasyTeamDataCollator(self.tokenizer, self.rag_retriever, self.max_length, self.eval_steps)
         self.fantasy_team_loss = FantasyTeamLoss(self.tokenizer)
         self.data_stats_cache = DataStatsCache(self.conf.rag.estimation_data_dir)
+        self.fantasy_metric = FantasyMetric(self.tokenizer)
 
         if self.peft_method != 'all':
             self.model = self.apply_peft_model()
@@ -119,170 +103,14 @@ class FantasyModel:
         return combined_input
 
     def decode_team(self, ids) -> Tuple[Dict[str, List[Tuple[str, int]]], int]:
-        decoded_text = self.tokenizer.decode(ids)
-        team_info = {}
-        budget_used = 0
-
-        # Regular expressions for parsing
-        team_pattern = r'Team:\n(.*?)Budget used:'
-        budget_pattern = r'Budget used: (\d+)M/125M'
-        position_pattern = r'\t([^:]+): (.+)'
-        player_pattern = r'([^(]+)\((\d+)M\)'
-
-        # Extract team information
-        team_match = re.search(team_pattern, decoded_text, re.DOTALL)
-        if team_match:
-            team_text = team_match.group(1)
-            for line in team_text.split('\n'):
-                position_match = re.match(position_pattern, line)
-                if position_match:
-                    position, players = position_match.groups()
-                    team_info[position] = []
-                    for player in players.split(', '):
-                        player_match = re.match(player_pattern, player)
-                        if player_match:
-                            name, cost = player_match.groups()
-                            team_info[position].append((name.strip(), int(cost)))
-                            budget_used += int(cost)
-
-        # Extract budget information
-        budget_match = re.search(budget_pattern, decoded_text)
-        if budget_match:
-            budget_used = int(budget_match.group(1))
-
-        return team_info, budget_used
+        return self.fantasy_metric.decode_team(ids)
 
     def is_team_valid(self, team_info: Dict[str, List[Tuple[str, int]]], budget_used: int,
                       matches: List[str], knockout_round: str) -> Tuple[bool, str]:
+        return self.fantasy_metric.is_team_valid(team_info, budget_used, matches, knockout_round)
 
-        formation = {
-            "Goalkeeper": 0,
-            "Defence": 0,
-            "Midfield": 0,
-            "Attack": 0
-        }
-        team_counts = {}
-        total_players = 0
-
-        # check available players
-        for position, players in team_info.items():
-            formation[position] = len(players)
-            total_players += len(players)
-
-            for player, cost in players:
-                # Check if player is in any of the matches
-                team = next((team for match in matches for team in match.split(' vs ') if player in team), None)
-                if team:
-                    team_counts[team] = team_counts.get(team, 0) + 1
-                else:
-                    return False, f"Player {player} is not part of a team in any of the provided matches."
-
-        # check formation
-        if (formation["Goalkeeper"] != 1 or
-                formation["Defence"] < 3 or formation["Defence"] > 5 or
-                formation["Midfield"] < 3 or formation["Midfield"] > 5 or
-                formation["Attack"] < 1 or formation["Attack"] > 3):
-            return False, f"Invalid formation: {formation}"
-
-        # check total number of players
-        if total_players != 11:
-            return False, f"Invalid number of players: {total_players}"
-
-        # check number of players per team
-        if knockout_round not in self.max_players_per_team:
-            return False, f"Invalid round: {knockout_round}"
-        for team, count in team_counts.items():
-            if count > self.max_players_per_team[knockout_round]:
-                return False, f"Too many players ({count}) from team {team} for {knockout_round}"
-
-        # check budget
-        if budget_used > self.max_budget_per_round[knockout_round]:
-            return False, f"Team cost ({budget_used}M) exceeds budget ({self.max_budget_per_round[knockout_round]}M)"
-
-        return True, "Team is valid"
-
-    def _estimate_player_score(self, player_stats: Dict, club_stats: Dict, position: str) -> float:
-        """
-        compute player estimated points based on past performance
-        """
-        if not player_stats:
-            return 0.0
-        goals, assists, lineups = 0, 0, 0
-        if player_stats['last_5']:
-            arr = np.array([(d['goals'], d['assists'], d['lineups']) for d in player_stats['last_5']])
-            goals, assists, lineups = arr.sum(axis=0)
-
-        player_last_5_score = ((4 * goals) + (3 * assists) + (1 * lineups)) / len(goals)
-        player_season_score = ((4 * player_stats['season']['goals'])
-                               + (3 * player_stats['season']['assists'])
-                               + (1 * player_stats['season']['lineups'])) / club_stats['seasonal']['games']
-
-        position_multiplier = {
-            'Goalkeeper': 3,
-            'Defender': 2,
-            'Midfielder': 1.4,
-            'Forward': 1.0
-        }.get(position, 1.0)
-
-        player_score = (player_last_5_score + player_season_score) * position_multiplier
-
-        # add team performance to player's score
-        result_map = {'win': 1, 'tie': 0, 'lose': -1}
-        last_5_cl = [result_map[res] for res in club_stats['last_5_cl']]
-        last_5_dl = [result_map[res] for res in club_stats['last_5_dl']]
-        player_team_score = (sum(last_5_cl) / min(1, len(club_stats['last_5_cl']))
-                             + sum(last_5_dl) / min(1, len(club_stats['last_5_dl'])))
-
-        # Calculate final score and normalize to be between 0 and 1
-        final_score = player_score + player_team_score
-        return min(final_score / self.max_player_score, 1.0)
-
-    def estimate_team_quality(self, team: Dict[str, List[Tuple[str, int]]], date: str, budget_used: int, kn_round: str) -> float:
-        """
-        team = {'goalkeeper': [(player_name, cost)...],'defence': [(player_name, cost)...],...}
-        """
-
-        score = 0.0
-        for position, players in team.items():
-            for player_name, _ in players:
-                player_stats, club_stats = self.data_stats_cache.get(date, player_name)
-                player_score = self._estimate_player_score(player_stats, club_stats, position)
-                score += player_score
-
-        # reward if the model use the budget correctly
-        if budget_used > self.max_budget_per_round[kn_round] - 5:
-            score = min(1.1 * score, 1.0)
-        elif budget_used > self.max_budget_per_round[kn_round] - 10:
-            score = min(1.05 * score, 1.0)
-
-        return score
-
-    def fantasy_metrics(self, eval_pred) -> Dict[str, float]:
-        logits, labels = eval_pred.predictions, eval_pred.labels_id
-        matches = eval_pred.inputs['matches']
-        knockout_rounds = eval_pred.inputs['round']
-        dates = eval_pred.inputs['date']
-        predictions = logits.argmax(axis=-1)
-        decoded_preds = self.tokenizer.batch_decode(predictions, skip_special_tokens=True)
-
-        validity_scores = []
-        quality_scores = []
-        for pred, match, kn_round, date in zip(decoded_preds, matches, knockout_rounds, dates):
-            team, budget_used = self.decode_team(pred)
-            is_valid, _ = self.is_team_valid(team, budget_used, match, kn_round)
-            validity_scores.append(int(is_valid))
-            if is_valid:
-                quality_scores.append(self.estimate_team_quality(team, date, budget_used, kn_round))
-
-        validity_rate = sum(validity_scores) / len(validity_scores)
-        avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0
-        combined_score = validity_rate * avg_quality
-
-        return {
-            "validity_rate": validity_rate,
-            "avg_quality": avg_quality,
-            "combined_score": combined_score
-        }
+    def compute_metrics(self, eval_pred) -> Dict[str, float]:
+        return self.fantasy_metric.compute_metrics(eval_pred)
 
     def fine_tune(self):
         train_dataset = self.fantasy_dataset.dataset_dict['train']
@@ -317,7 +145,7 @@ class FantasyModel:
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             data_collator=self.data_collator,
-            compute_metrics=self.fantasy_metrics,
+            compute_metrics=self.compute_metrics,
             callbacks=[early_stopping_callback],
             fantasy_team_loss=self.fantasy_team_loss,
             eval_steps=self.eval_steps,

@@ -2,7 +2,7 @@ from typing import Dict, List, Any
 import torch
 
 from ..rag.fantasy_rag import SeasonSpecificRAG
-from ...system_prompts import instruction_prompt, full_rules_prompt
+from ...system_prompts import instruction_prompt, full_rules_prompt, short_rules_prompt
 
 
 class FantasyTeamDataCollator:
@@ -37,9 +37,13 @@ class FantasyTeamDataCollator:
 
     def process_sample(self, sample: Dict[str, Any], rag_info: Dict[str, List[str]]) -> Dict[str, Any]:
 
-        combined_input = self.combine_input_with_rag(sample['text'], rag_info)
-        input_encodings = self.tokenizer(combined_input, truncation=True,
-                                         max_length=self.max_length, padding="max_length")
+        if rag_info is None:
+            input_encodings = self.tokenizer(sample['text'], truncation=True,
+                                             max_length=self.max_length, padding="max_length")
+        else:
+            combined_input = self.combine_input_with_rag(sample['text'], rag_info)
+            input_encodings = self.tokenizer(combined_input, truncation=True,
+                                             max_length=self.max_length, padding="max_length")
 
         return {
             "input_ids": torch.tensor(input_encodings["input_ids"]),
@@ -59,7 +63,7 @@ class FantasyTeamDataCollator:
         # add system prompts occasionally
         if self.steps % self.eval_steps == 0:
             combined_input = (f"Instructions: {instruction_prompt}\n\n"
-                              f"League Rules: {full_rules_prompt}\n\n"
+                              f"League Rules: {short_rules_prompt}\n\n"
                               f"{combined_input}")
         self.steps += 1
 

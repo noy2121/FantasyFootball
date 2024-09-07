@@ -1,3 +1,5 @@
+import sys
+
 import torch
 import numpy as np
 
@@ -35,8 +37,8 @@ class FantasyTrainer(Trainer):
         total_loss = lm_loss + (self.structure_weight * structure_loss)
 
         # Add L2 regularization
-        l2_lambda = 0.01  # Adjust this value as needed
-        l2_reg = torch.sum(torch.stack([p.pow(2.0).sum() for p in model.parameters()]))
+        l2_lambda = 1e-5  # Adjust this value as needed
+        l2_reg = torch.sum(torch.stack([p.pow(2.0).sum() for p in model.parameters() if p.requires_grad]))
         total_loss += l2_lambda * l2_reg
 
         # Update losses
@@ -49,14 +51,11 @@ class FantasyTrainer(Trainer):
             self._log_metrics()
 
         # Decrease structure weight over time
-        self.structure_weight = np.maximum(self.min_structure_weight, self.structure_weight * 0.9)
+        self.structure_weight = max(self.min_structure_weight, self.structure_weight * 0.9)
 
         self.steps += 1
 
         return (total_loss, outputs) if return_outputs else total_loss
-
-    def _move_model_to_device(self, model, device):
-        pass
 
     def _log_metrics(self):
         avg_loss = np.mean(self.losses['loss'][-self.eval_steps:])

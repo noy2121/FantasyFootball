@@ -9,7 +9,7 @@ sample_user_prompt = (
     "Inter Milan vs Atletico Madrid, "
     "Porto vs Arsenal, "
     "Napoli vs Barcelona]\n"
-    "round: Group Stage\n"
+    "round: Round of 16\n"
     "season: 2022/23\n"
     "date: 2023-09-17")
 
@@ -18,14 +18,14 @@ instruction_prompt = (
     "Your task is to build a team consist of 11 players to finish as high as possible. "
     "You must follow the rules of the game, and cannot break them.\n"
     "The following is an example of the output format. Your output must have this format."
-    "<OUTPUT START>"
+    "<OUTPUT STARTS>"
     "Team:\n"
-    "\tGoalkeeper: Andriy Lunin (6M)\n"
-    "\tDefence: Matteo Darmian (6M), Federico Dimarco (7M), Joao Mario (6M)\n"
-    "\tMidfield: Jamal Musiala (12M), Dani Olmo(10M), Marcel Sabitzer(9M), Phil Foden (13M)\n"
-    "\tAttack: Bukayo Saka (14M), Erling Haaland (15M), Lamine Yamal (11M)\n"
-    "Budget used: 109M/125M"
-    "<OUTPUT START>"
+    "\tGoalkeeper: <PLAYER NAME> (<PLAYER COST>)\n"
+    "\tDefence: 3*<PLAYER NAME> (<PLAYER COST>)\n"
+    "\tMidfield: 4*<PLAYER NAME> (<PLAYER COST>)\n"
+    "\tAttack: 3*<PLAYER NAME> (<PLAYER COST>)\n"
+    "Budget used: <SUM OF COSTS>M/110M"
+    "<OUTPUT ENDS>"
 )
 
 short_rules_prompt = (

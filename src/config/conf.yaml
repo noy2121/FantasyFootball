@@ -30,37 +30,42 @@ data:
   test_year: 2023
 
 model:
-  model_name: 'mistralai/Mistral-7B-Instruct-v0.2'   # mistralai/Mistral-7B-Instruct-v0.2, meta-llama/Llama-2-7b-hf, bigscience/bloomz-560m
+  model_name: 'EleutherAI/pythia-1b'
   load_in_4bit: True
-  quant_type: 'nf4'
-  quant_compute_dtype: 'float16'
-  use_double_quant: False
+  use_flash_attention: True
   cache_dir: '.cache\huggingface'
   hf_token_filepath: 'data/keys/huggingface_token.txt'
   max_length: 4096
-  gradient_checkpointing: True
 
 train:
-  num_epochs: 10
-  batch_size: 4
-  peft_method: 'all'
+  num_epochs: 3
+  batch_size: 1
+  peft_method: 'lora'
   evaluation_steps: 100
   learning_rate: 2e-4
   weight_decay: 0.001
-  mixed_precision: True
-  accumulation_steps: 2
+  mixed_precision: False
+  accumulation_steps: 16
   out_dir: 'results'
 
 peft:
-  method: 'lora'
   r: 16
   lora_alpha: 32
   target_modules: ['query_key_value']
   dropout: 0.1
 
 evaluate:
-  models_dir: 'results/ft_models/bigscience'
-  out_dir: 'evaluations'
 
 inference:
-  vanilla: False
+  vanilla: True
+
+
+#################
+# models
+################
+# 'bigscience/bloomz-560m', bigscience/bloomz-1b7, bigscience/bloomz-3b
+# EleutherAI/gpt-neo-1.3B, EleutherAI/gpt-neo-2.7B,
+# EleutherAI/pythia-410m, EleutherAI/pythia-1b, EleutherAI/pythia-1.4b, EleutherAI/pythia-2.8b
+# facebook/opt-1.3b, facebook/opt-2.7b
+# microsoft/Phi-3-mini-4k-instruct (3.8B), microsoft/Phi-3.5-mini-instruct (3.8B), microsoft/Phi-3-small-8k-instruct (7B)
+# mistralai/Mistral-7B-Instruct-v0.3, mistralai/Mistral-7B-Instruct-v0.2, mistralai/Mistral-Nemo-Instruct-2407

@@ -1,9 +1,12 @@
+import os
+import sys
+
 import torch
 from pathlib import Path
 from typing import List, Dict, Tuple
 from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments
-from transformers import EarlyStoppingCallback
-from peft import PeftModel, get_peft_model, LoraConfig, PrefixTuningConfig, TaskType
+from transformers import EarlyStoppingCallback, BitsAndBytesConfig
+from peft import PeftModel, get_peft_model, LoraConfig, PrefixTuningConfig, TaskType, prepare_model_for_kbit_training
 from peft.utils.other import TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING as LoRA_MODULES_MAPPING
 
 from .trainer.fantasy_trainer import FantasyTrainer
@@ -13,6 +16,8 @@ from .trainer.fantasy_loss import FantasyTeamLoss
 from .rag.fantasy_rag import SeasonSpecificRAG
 from .metrics.fantasy_metrics import FantasyMetric
 from .fantasy_stats import DataStatsCache
+from .flash_attention import apply_flash_attention
+from ..system_prompts import instruction_prompt, full_rules_prompt, short_rules_prompt
 from ..utils.utils import get_hftoken
 
 
@@ -25,6 +30,7 @@ class FantasyModel:
         self.rag_data_dir = cfg.rag.rag_dir
         self.model_name = cfg.model.model_name
         self.max_length = cfg.model.max_length
+        self.use_flash_attention = cfg.model.use_flash_attention
         self.peft_method = cfg.train.peft_method
         self.num_epochs = cfg.train.num_epochs
         self.bz = cfg.train.batch_size
@@ -46,29 +52,55 @@ class FantasyModel:
         if self.peft_method != 'all':
             self.model = self.apply_peft_model()
 
+        if self.use_flash_attention:
+            # torch.backends.cuda.enable_flash_sdp(True)
+            self.model = self._apply_flash_attn()
+
     def create_model_and_tokenizer(self):
         print(f'Load model and tokenizer: {self.model_name}')
         hf_token = get_hftoken(self.conf.model.hf_token_filepath)
 
-       # load tokenizer
+        # load tokenizer
         tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
             tokenizer.pad_token_id = tokenizer.eos_token_id
 
         # load model
-        model = AutoModelForCausalLM.from_pretrained(self.model_name, token=hf_token, device_map='auto',
-                                                     torch_dtype=torch.float16, low_cpu_mem_usage=True)
+        if self.conf.model.load_in_4bit:
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type='nf4',
+                bnb_4bit_compute_dtype=torch.bfloat16
+            )
 
-        if self.conf.model.gradient_checkpointing:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.model_name,
+                token=hf_token,
+                trust_remote_code=True,
+                quantization_config=bnb_config,
+                torch_dtype=torch.bfloat16,
+                use_cache=False)
+            model.gradient_checkpointing_enable()
+
+        else:
+            model = AutoModelForCausalLM.from_pretrained(self.model_name, token=hf_token,
+                                                         trust_remote_code=True, use_cache=False)
+
             model.gradient_checkpointing_enable()
 
         return model, tokenizer
 
+    def _apply_flash_attn(self):
+        print('Using Flash Attention...')
+        return apply_flash_attention(self.model)
+
     def apply_peft_model(self):
-        print(f'Apply PEFT method [{self.peft_method}] to the model')
+        print(f'Apply PEFT method [{self.peft_method}] to the model...')
         if self.peft_method == 'lora':
-            default_target_modules = LoRA_MODULES_MAPPING.get(self.model_name, ["q_proj", "v_proj"])
+            model_type = '_'.join(self.model_name.split('/')[1].split('-')[:-1])
+            default_target_modules = LoRA_MODULES_MAPPING.get(model_type, ['query_key_value'])
             peft_config = LoraConfig(
                 task_type=TaskType.CAUSAL_LM,
                 r=self.conf.peft.r,
@@ -87,6 +119,7 @@ class FantasyModel:
             raise ValueError(f"Unsupported PEFT method: {self.peft_method}")
 
         model = get_peft_model(self.model, peft_config)
+
         return model
 
     def combine_with_rag(self, input_text: str, teams: List[str], date: str, season: str) -> str:
@@ -113,6 +146,7 @@ class FantasyModel:
         return self.fantasy_metric.compute_metrics(eval_pred)
 
     def fine_tune(self):
+
         train_dataset = self.fantasy_dataset.dataset_dict['train']
         eval_dataset = self.fantasy_dataset.dataset_dict['test']
 
@@ -130,12 +164,14 @@ class FantasyModel:
             load_best_model_at_end=True,
             metric_for_best_model='combined_score',
             greater_is_better=True,
-            eval_strategy='steps',
+            eval_strategy='epoch',
             eval_steps=self.eval_steps,
-            save_steps=self.eval_steps,
+            save_strategy='epoch',
             save_total_limit=10,
-            fp16=self.conf.train.mixed_precision,
-            remove_unused_columns=False
+            bf16=True,
+            remove_unused_columns=False,
+            max_grad_norm=1.0,
+            gradient_checkpointing=True
         )
 
         print('\nBegin fine-tuning the model')
@@ -170,15 +206,23 @@ class FantasyModel:
         else:
             model_for_inference = self.model
 
+        # add instructions
+        prompt = (f"Instructions: {instruction_prompt}\n\n"
+                  f"League Rules: {short_rules_prompt}\n\n"
+                  f"{prompt}")
+
+        suffix = "\nTeam:\n"
+        prompt = prompt + suffix
         inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True,
                                 max_length=self.max_length)
+
+        # model_for_inference.to(self.device)
+        inputs = {key: value.to(self.device) for key, value in inputs.items()}
         outputs = model_for_inference.generate(
             **inputs,
             max_length=self.max_length,
             num_return_sequences=1,
-            no_repeat_ngram_size=5,
-            temperature=0.7,
-            prefix="Team:\n"
+            no_repeat_ngram_size=5
         )
 
         team, budget_used = self.decode_team(outputs[0])

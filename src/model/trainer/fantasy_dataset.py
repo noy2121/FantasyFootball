@@ -46,7 +46,7 @@ class FantasyDataset:
         with open(filename, 'r') as f:
             json_data = json.load(f)
             for sample_id, sample in tqdm(json_data.items(), file=sys.stdout, total=len(json_data), colour='WHITE',
-                                          desc=f'\tLoad {mode} data'):
+                                          desc=f'\tLoad {mode} data', position=0, leave=True):
                 parsed_sample = self._process_prompt(sample_id, sample)
                 parsed_sample['sample_id'] = sample_id
                 data.append(parsed_sample)

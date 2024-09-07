@@ -28,9 +28,8 @@ class SeasonSpecificRAG:
     club_entry_format = club_entry_format
     player_entry_format = player_entry_format
 
-    def __init__(self, cfg: DictConfig, device: str = 'cpu'):
+    def __init__(self, cfg: DictConfig):
 
-        self.device = device
         self.data_dir = cfg.rag_dir
         self.csvs_dir = cfg.csvs_dir
         self.embedding_model_name = cfg.embedding_model_name
@@ -211,7 +210,6 @@ class SeasonSpecificRAG:
 
     @classmethod
     def load(cls, input_dir: str):
-        print('\nLoad RAG Dataset')
         instance = cls.__new__(cls)
         instance.encoder = SentenceTransformer(os.path.join(input_dir, 'embedding_model'))
         with open(os.path.join(input_dir, 'seasons.txt'), 'r') as f:
@@ -226,13 +224,12 @@ class SeasonSpecificRAG:
         instance.season_end_date = '06-20'
         instance.decision_points = instance._generate_decision_points()
 
-        for season in seasons:
+        for season in tqdm(seasons, file=sys.stdout, colour='WHITE', desc='Load RAG Dataset', position=0, leave=True):
             instance.rag_data[season] = {}
             instance.indices[season] = {}
             instance.cached_club_data[season] = {}
             instance.cached_player_data[season] = {}
-            for dp in tqdm(instance.decision_points[1:], file=sys.stdout, colour='WHITE',
-                           desc=f'\tLoad RAG data for {season=}'):
+            for dp in instance.decision_points[1:]:
                 dirpath = os.path.join(input_dir, f'rag_dataset_{season}/{dp}')
                 instance.rag_data[season][dp] = {}
                 instance.indices[season][dp] = {}
@@ -301,15 +298,18 @@ class SeasonSpecificRAG:
             # handle clubs info
             teams_set = set(teams)
             _, teams_idxs = self.indices[season][nearest_dp]['clubs'].search(embeddings_batch[batch_start:batch_start + len(teams)], k)
-
+            chosen_teams = set()
             for t_idxs in teams_idxs:
                 for i in t_idxs:
                     if i not in cached_club_data:
                         cached_club_data[i] = self.get_cached_club_data(season, nearest_dp, i)
                     res = cached_club_data[i]
                     team_name = res.split(',')[0].split(': ')[1]
+                    if team_name in chosen_teams:
+                        continue
                     if team_name in teams_set:
                         relevant_info[q_idx]["teams"].append(res)
+                        chosen_teams.add(team_name)
 
             # handle players info
             _, players_idxs = self.indices[season][nearest_dp]['players'].search(embeddings_batch[batch_start:batch_start + len(teams)], k * 5)

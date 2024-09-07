@@ -1,27 +1,38 @@
+import os
+os.environ['TORCH_USE_CUDA_DSA'] = "1"
+
 import re
 import hydra
 import torch
+torch.cuda.empty_cache()
+
 from typing import List, Dict, Tuple
 from omegaconf import DictConfig, OmegaConf
 from src.model.fantasy_model import FantasyModel
 from src.model.rag.fantasy_rag import SeasonSpecificRAG
 
+import warnings
+
+warnings.filterwarnings("ignore", category=FutureWarning, module="torch.utils.checkpoint")
+warnings.filterwarnings("ignore", category=UserWarning, module="torch._dynamo.eval_frame")
+warnings.filterwarnings("ignore", message="None of the inputs have requires_grad=True. Gradients will be None")
+
 
 def get_user_input():
-    print("Please enter your prompt in the following format:")
-    print("matches: [Team1 vs Team2, Team3 vs Team4, ...]\n"
-          "round: [Group Stage/Round of 16/Quarter-final/Semi-final/Final]\n"
-          "season: YYYY/YY\n"
-          "date: YYYY-MM-DD")
+    sample_user_prompt = (
+        "matches: [Copenhagen vs Manchester City, "
+        "RB Leipzig vs Real Madrid, "
+        "Paris Saint-Germain vs Real Sociedad, "
+        "Lazio vs Bayern Munich, "
+        "PSV Eindhoven vs Borussia Dortmund, "
+        "Inter Milan vs Atletico Madrid, "
+        "Porto vs Arsenal, "
+        "Napoli vs Barcelona]\n"
+        "round: Group Stage\n"
+        "season: 2022/23\n"
+        "date: 2023-09-17")
 
-    i = 0
-    while i < 5:
-        user_input = input("\nEnter your prompt: ")
-        if validate_input(user_input):
-            return user_input
-        print("Invalid input. Please try again.")
-        i += 1
-    raise TimeoutError('You ran out of time. Please try later.')
+    return sample_user_prompt
 
 
 def validate_input(input_str):
@@ -74,7 +85,7 @@ def main(cfg: DictConfig):
         print("Evaluation mode not yet implemented")
 
     elif mode == "inference":
-        model = FantasyModel(cfg)
+        model = FantasyModel(cfg, device)
         user_prompt = get_user_input()
         result = model.inference(user_prompt)
         print("\nInference Result:")
@@ -82,7 +93,7 @@ def main(cfg: DictConfig):
 
     elif mode == "build_rag":
         print("Start building RAG dataset")
-        rag_system = SeasonSpecificRAG(cfg.rag, device)
+        rag_system = SeasonSpecificRAG(cfg.rag)
         rag_system.prepare_rag_data()
         rag_system.build_indices()
         rag_system.save()

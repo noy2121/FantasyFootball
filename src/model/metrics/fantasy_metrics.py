@@ -1,5 +1,6 @@
 import re
 from typing import Dict, List, Tuple
+import torch
 import numpy as np
 
 
@@ -25,8 +26,9 @@ def seasonal_avg_score(player_stats, num_games):
 
 
 class FantasyMetric:
-    def __init__(self, tokenizer):
+    def __init__(self, tokenizer, eval_dataset):
         self.tokenizer = tokenizer
+        self.eval_dataset = eval_dataset
         self.max_player_score = 100
         self.max_budget_per_round = {
             "group stage": 100,
@@ -41,6 +43,12 @@ class FantasyMetric:
             "quarter-final": 4,
             "semi-final": 6,
             "final": 8
+        }
+
+        self.metrics = {
+            "validity_rate": [],
+            "avg_quality": [],
+            "combined_score": []
         }
 
     def is_team_valid(self, team_info: Dict[str, List[Tuple[str, int]]], budget_used: int,
@@ -136,14 +144,13 @@ class FantasyMetric:
 
         # reward if the model use the budget correctly
         if budget_used > self.max_budget_per_round[kn_round] - 5:
-            score = min(1.1 * score, 1.0)
+            score = min(1.2 * score, 1.0)
         elif budget_used > self.max_budget_per_round[kn_round] - 10:
             score = min(1.05 * score, 1.0)
 
         return score
 
-    def decode_team(self, ids) -> Tuple[Dict[str, List[Tuple[str, int]]], int]:
-        decoded_text = self.tokenizer.decode(ids)
+    def decode_team(self, decoded_text) -> Tuple[Dict[str, List[Tuple[str, int]]], int]:
         team_info = {}
         budget_used = 0
 
@@ -177,10 +184,15 @@ class FantasyMetric:
         return team_info, budget_used
 
     def compute_metrics(self, eval_pred) -> Dict[str, float]:
-        logits, labels = eval_pred.predictions, eval_pred.labels_id
-        matches = eval_pred.inputs['matches']
-        knockout_rounds = eval_pred.inputs['round']
-        dates = eval_pred.inputs['date']
+        logits, labels = eval_pred.predictions, eval_pred.label_ids
+        # matches = eval_pred.inputs['matches']
+        # knockout_rounds = eval_pred.inputs['round']
+        # dates = eval_pred.inputs['date']
+
+        matches = self.eval_dataset['matches']
+        knockout_rounds = self.eval_dataset['round']
+        dates = self.eval_dataset['date']
+
         predictions = logits.argmax(axis=-1)
         decoded_preds = self.tokenizer.batch_decode(predictions, skip_special_tokens=True)
 
@@ -197,8 +209,31 @@ class FantasyMetric:
         avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0
         combined_score = validity_rate * avg_quality
 
+        self.metrics["validity_rate"].append(validity_rate)
+        self.metrics["avg_quality"].append(avg_quality)
+        self.metrics["combined_score"].append(combined_score)
+        self.log_metrics()
+
         return {
             "validity_rate": validity_rate,
             "avg_quality": avg_quality,
             "combined_score": combined_score
         }
+
+    def log_metrics(self):
+        avg_score = np.mean(self.metrics['combined_score'])
+        avg_quality = np.mean(self.metrics['avg_quality'])
+        avg_vr = np.mean(self.metrics['validity_rate'])
+        print(f"Evaluation: Avg Score: {avg_score:.4f}, "
+              f"Avg Team Quality: {avg_quality:.4f}, "
+              f"Avg Team Validity: {avg_vr:.4f}")
+
+    def preprocess_logits_for_metrics(self, logits, labels):
+        """
+        Original Trainer may have a memory leak.
+        This is a workaround to avoid storing too many tensors that are not needed.
+        """
+        if isinstance(logits, tuple):
+            logits = logits[0]
+        pred_ids = torch.argmax(logits, dim=-1)
+        return pred_ids

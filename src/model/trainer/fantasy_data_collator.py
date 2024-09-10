@@ -49,8 +49,9 @@ class FantasyTeamDataCollator:
             "input_ids": torch.tensor(input_encodings["input_ids"]),
             "attention_mask": torch.tensor(input_encodings["attention_mask"]),
             "labels": torch.tensor(input_encodings["input_ids"]),
-            "matches": sample['matches'],
-            "round": sample['round']
+            "matches": sample["matches"],
+            "round": sample["round"],
+            "date": sample["date"]
         }
 
     def combine_input_with_rag(self, input_text: str, rag_info: Dict[str, List[str]]) -> str:
@@ -76,5 +77,6 @@ class FantasyTeamDataCollator:
             "attention_mask": torch.stack([item["attention_mask"] for item in batch]),
             "labels": torch.stack([item["labels"] for item in batch]),
             "matches": [item["matches"] for item in batch],
-            "round": [item["round"] for item in batch]
+            "round": [item["round"] for item in batch],
+            "date": [item["date"] for item in batch]
         }

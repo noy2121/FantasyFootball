@@ -47,7 +47,7 @@ class FantasyModel:
         self.data_collator = FantasyTeamDataCollator(self.tokenizer, self.rag_retriever, self.max_length, self.eval_steps)
         self.fantasy_team_loss = FantasyTeamLoss(self.tokenizer)
         self.data_stats_cache = DataStatsCache(self.conf.rag.estimation_data_dir)
-        self.fantasy_metric = FantasyMetric(self.tokenizer)
+        self.fantasy_metric = FantasyMetric(self.tokenizer, self.fantasy_dataset.dataset_dict['test'])
 
         if self.peft_method != 'all':
             self.model = self.apply_peft_model()
@@ -99,8 +99,7 @@ class FantasyModel:
     def apply_peft_model(self):
         print(f'Apply PEFT method [{self.peft_method}] to the model...')
         if self.peft_method == 'lora':
-            model_type = '_'.join(self.model_name.split('/')[1].split('-')[:-1])
-            default_target_modules = LoRA_MODULES_MAPPING.get(model_type, ['query_key_value'])
+            default_target_modules = list(self.conf.peft.target_modules)
             peft_config = LoraConfig(
                 task_type=TaskType.CAUSAL_LM,
                 r=self.conf.peft.r,
@@ -142,6 +141,9 @@ class FantasyModel:
                       matches: List[str], knockout_round: str) -> Tuple[bool, str]:
         return self.fantasy_metric.is_team_valid(team_info, budget_used, matches, knockout_round)
 
+    def preprocess_logits_for_metrics(self, logits, labels):
+        return self.fantasy_metric.preprocess_logits_for_metrics(logits, labels)
+
     def compute_metrics(self, eval_pred) -> Dict[str, float]:
         return self.fantasy_metric.compute_metrics(eval_pred)
 
@@ -164,9 +166,10 @@ class FantasyModel:
             load_best_model_at_end=True,
             metric_for_best_model='combined_score',
             greater_is_better=True,
-            eval_strategy='epoch',
-            eval_steps=self.eval_steps,
-            save_strategy='epoch',
+            evaluation_strategy='steps',
+            eval_steps=self.eval_steps // self.conf.train.accumulation_steps,
+            save_steps=self.eval_steps // self.conf.train.accumulation_steps,
+            save_strategy='steps',
             save_total_limit=10,
             bf16=True,
             remove_unused_columns=False,
@@ -182,12 +185,15 @@ class FantasyModel:
             eval_dataset=eval_dataset,
             data_collator=self.data_collator,
             compute_metrics=self.compute_metrics,
+            preprocess_logits_for_metrics=self.preprocess_logits_for_metrics,
             callbacks=[early_stopping_callback],
             fantasy_team_loss=self.fantasy_team_loss,
-            eval_steps=self.eval_steps,
             initial_structure_weight=self.structure_weight,
             min_structure_weight=self.min_structure_weight
         )
+
+        print(f"Evaluation strategy: {training_args.evaluation_strategy}")
+        print(f"Evaluation steps: {training_args.eval_steps}")
 
         trainer.train()
 

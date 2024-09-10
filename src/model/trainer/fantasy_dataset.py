@@ -38,7 +38,7 @@ class FantasyDataset:
         print('\nLoad data for training')
         train_data = self._load_json_file(f'{self.train_filepath}', 'train')
         test_data = self._load_json_file(f'{self.test_filepath}', 'test')
-        return train_data, test_data
+        return train_data, test_data[:300]
 
     def _load_json_file(self, filepath: str, mode: str) -> pd.DataFrame:
         filename = os.path.join(self.data_dir, f'{filepath}/{mode}.json')
@@ -50,7 +50,7 @@ class FantasyDataset:
                 parsed_sample = self._process_prompt(sample_id, sample)
                 parsed_sample['sample_id'] = sample_id
                 data.append(parsed_sample)
-            return pd.DataFrame(data)
+        return pd.DataFrame(data)
 
     @staticmethod
     def parse_prompt(prompt: str) -> Tuple[List[Tuple[str, str]], str, str, str, List[str]]:

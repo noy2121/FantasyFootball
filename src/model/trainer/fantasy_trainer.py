@@ -11,7 +11,7 @@ class FantasyTrainer(Trainer):
     def __init__(self, *args, **kwargs):
         # Extract custom arguments
         self.fantasy_team_loss = kwargs.pop('fantasy_team_loss', None)
-        self.eval_steps = kwargs.pop('eval_steps', 100)
+        self.logging_steps = 200
         self.structure_weight = kwargs.pop('initial_structure_weight', 1.0)
         self.min_structure_weight = kwargs.pop('min_structure_weight', 0.1)
 
@@ -47,7 +47,7 @@ class FantasyTrainer(Trainer):
         self.losses['structure_loss'].append(structure_loss.item())
 
         # Log metrics every eval_steps
-        if self.steps % self.eval_steps == 0:
+        if self.steps % self.logging_steps == 0:
             self._log_metrics()
 
         # Decrease structure weight over time
@@ -58,9 +58,9 @@ class FantasyTrainer(Trainer):
         return (total_loss, outputs) if return_outputs else total_loss
 
     def _log_metrics(self):
-        avg_loss = np.mean(self.losses['loss'][-self.eval_steps:])
-        avg_lm_loss = np.mean(self.losses['lm_loss'][-self.eval_steps:])
-        avg_structure_loss = np.mean(self.losses['structure_loss'][-self.eval_steps:])
+        avg_loss = np.mean(self.losses['loss'][-self.logging_steps:])
+        avg_lm_loss = np.mean(self.losses['lm_loss'][-self.logging_steps:])
+        avg_structure_loss = np.mean(self.losses['structure_loss'][-self.logging_steps:])
         print(f"Step {self.steps}: Avg Loss: {avg_loss:.4f}, "
               f"Avg LM Loss: {avg_lm_loss:.4f}, "
               f"Avg Structure Loss: {avg_structure_loss:.4f}")
@@ -71,3 +71,7 @@ class FantasyTrainer(Trainer):
         self.steps = 0
         self.losses = {k: [] for k in self.losses}
         return super().train(resume_from_checkpoint, trial, **kwargs)
+
+    def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix="eval"):
+        print("Evaluation started!")
+        return super().evaluate(eval_dataset, ignore_keys, metric_key_prefix)

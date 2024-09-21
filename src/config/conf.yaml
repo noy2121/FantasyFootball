@@ -30,7 +30,7 @@ data:
   test_year: 2023
 
 model:
-  model_name: 'EleutherAI/pythia-1b'
+  model_name: 'mistralai/Mistral-Nemo-Instruct-2407'
   load_in_4bit: True
   use_flash_attention: True
   cache_dir: '.cache\huggingface'
@@ -41,7 +41,7 @@ train:
   num_epochs: 3
   batch_size: 1
   peft_method: 'lora'
-  evaluation_steps: 100
+  evaluation_steps: 2000
   learning_rate: 2e-4
   weight_decay: 0.001
   mixed_precision: False
@@ -51,13 +51,14 @@ train:
 peft:
   r: 16
   lora_alpha: 32
-  target_modules: ['query_key_value']
+  target_modules: ["q_proj", "v_proj", "k_proj"]
   dropout: 0.1
 
 evaluate:
 
 inference:
   vanilla: True
+  model_dir: 'results/Mistral-Nemo-Instruct-2407/lora'
 
 
 #################
@@ -66,6 +67,9 @@ inference:
 # 'bigscience/bloomz-560m', bigscience/bloomz-1b7, bigscience/bloomz-3b
 # EleutherAI/gpt-neo-1.3B, EleutherAI/gpt-neo-2.7B,
 # EleutherAI/pythia-410m, EleutherAI/pythia-1b, EleutherAI/pythia-1.4b, EleutherAI/pythia-2.8b
-# facebook/opt-1.3b, facebook/opt-2.7b
 # microsoft/Phi-3-mini-4k-instruct (3.8B), microsoft/Phi-3.5-mini-instruct (3.8B), microsoft/Phi-3-small-8k-instruct (7B)
 # mistralai/Mistral-7B-Instruct-v0.3, mistralai/Mistral-7B-Instruct-v0.2, mistralai/Mistral-Nemo-Instruct-2407
+# tiiuae/falcon-mamba-7b
+# google/gemma-2-9b
+# meta-llama/Meta-Llama-3.1-8B-Instruct
+# allenai/OLMoE-1B-7B-0924-Instruct

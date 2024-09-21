@@ -201,6 +201,7 @@ class FantasyModel:
         self.save_model()
 
     def inference(self, prompt: str) -> Dict[str, List[Tuple[str, int]]]:
+        print('Begin inference')
         matches, kn_round, season, date_str, teams = self.fantasy_dataset.parse_prompt(prompt)
 
         if not self.conf.inference.vanilla:
@@ -230,16 +231,16 @@ class FantasyModel:
             num_return_sequences=1,
             no_repeat_ngram_size=5
         )
-
-        team, budget_used = self.decode_team(outputs[0])
+        decoded_preds = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
+        team, budget_used = self.decode_team(decoded_preds)
         return team
 
     @classmethod
-    def load_from_checkpoint(cls, model_dir):
+    def load_from_checkpoint(cls, model_dir, device='cpu'):
         config = torch.load(f"{model_dir}/config.pt")
 
         # Create an instance of FantasyModel
-        instance = cls(config)
+        instance = cls(config, device)
 
         # Load the tokenizer
         instance.tokenizer = AutoTokenizer.from_pretrained(f"{model_dir}/tokenizer")

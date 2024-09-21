@@ -18,8 +18,8 @@ def last_5_games_avg_score(stats):
 def seasonal_avg_score(player_stats, num_games):
     if num_games == 0:
         return 0
-    avg_score = ((4 * player_stats['seasonal']['goals'])
-                 + (3 * player_stats['seasonal']['assists'])
+    avg_score = ((7 * player_stats['seasonal']['goals'])
+                 + (5 * player_stats['seasonal']['assists'])
                  + (2 * player_stats['seasonal']['lineups'])) / num_games
 
     return np.round(avg_score, 3)
@@ -110,11 +110,11 @@ class FantasyMetric:
         player_last_5_avg_score = last_5_games_avg_score(player_stats)
         player_season_avg_score = seasonal_avg_score(player_stats, club_stats['seasonal']['games'])
         position_multiplier = {
-            'Goalkeeper': 3,
-            'Defender': 2,
-            'Midfielder': 1.4,
-            'Forward': 1.0
-        }.get(position, 1.0)
+            'Goalkeeper': 5,
+            'Defender': 4,
+            'Midfielder': 3,
+            'Forward': 2.0
+        }.get(position, 2.0)
 
         player_score = (player_last_5_avg_score + player_season_avg_score) * position_multiplier
 
@@ -126,7 +126,7 @@ class FantasyMetric:
                              + sum(last_5_dl) / min(1, len(club_stats['last_5_dl'])))
 
         # Calculate final score and add random points
-        final_score = player_score + player_team_score + np.random.randint(-5, 5)
+        final_score = player_score + player_team_score + np.random.randint(-10, 10)
         return max(1, final_score)
 
     def estimate_team_quality(self, team: Dict[str, List[Tuple[str, int]]], date: str, budget_used: int, kn_round: str) -> float:

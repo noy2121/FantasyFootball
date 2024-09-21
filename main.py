@@ -30,7 +30,7 @@ def get_user_input():
         "Napoli vs Barcelona]\n"
         "round: Group Stage\n"
         "season: 2022/23\n"
-        "date: 2023-09-17")
+        "date: 2022-11-23")
 
     return sample_user_prompt
 
@@ -85,7 +85,8 @@ def main(cfg: DictConfig):
         print("Evaluation mode not yet implemented")
 
     elif mode == "inference":
-        model = FantasyModel(cfg, device)
+        model_dir = cfg.inference.model_dir
+        model = FantasyModel.load_from_checkpoint(model_dir, device)
         user_prompt = get_user_input()
         result = model.inference(user_prompt)
         print("\nInference Result:")

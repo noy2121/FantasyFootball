@@ -21,21 +21,13 @@ licensed under CC0 1.0 Universal.
 git clone https://github.com/your-username/fantasy-football-team-builder.git
 cd fantasy-football-team-builder
 
-
-Copy
-
 2. Install dependencies:
-pip install -r requirements.txt
-
-
-Copy
+`pip install -r requirements.txt`
 
 3. Set up the data:
 - Ensure you have the necessary CSV files in the `data/csvs` directory
 - Run the RAG data preparation script:
-  ```
-  python main.py mode=build_rag
-  ```
+`python main.py mode="build_rag"`
 
 ## Usage
 
@@ -44,35 +36,25 @@ The project supports multiple modes of operation, controlled via the `mode` para
 ### Fine-tuning
 
 To fine-tune the model:
-python main.py mode=fine_tune
-
-
-Copy
+`python main.py mode="fine_tune"`
 
 ### Inference
 
 To generate a fantasy team using the fine-tuned model:
-python main.py mode=inference
+`python main.py mode="inference"`
 
-
-Copy
-
-You will be prompted to enter match information in the following format:
-matches: [Team1 vs Team2, Team3 vs Team4, ...]
-round: [Group Stage/Round of 16/Quarter-final/Semi-final/Final]
-season: YYYY/YY
-date: YYYY-MM-DD
-
-
-Copy
+You will be prompted to enter match information in the following format:  
+'''  
+matches: [Team1 vs Team2, Team3 vs Team4, ...],  
+round: Group Stage/Round of 16/Quarter-final/Semi-final/Final,  
+season: YYYY/YY,  
+date: YYYY-MM-DD,    
+''''
 
 ### Evaluation
 
 To evaluate the model's performance:
-python main.py mode=evaluate
-
-
-Copy
+`python main.py mode=evaluate`
 
 ## Configuration
 
@@ -83,11 +65,18 @@ The project uses Hydra for configuration management. The main configuration file
 - `src/`
   - `model/`: Contains the core model implementations
     - `fantasy_model.py`: Main FantasyModel class
-    - `rag_dataset.py`: RAG data preparation and retrieval
-    - `fantasy_loss.py`: Custom loss functions
+    - `flash_attention.py`: FlashAttention wrapper for optimize performance
     - `fantasy_stats.py`: Player and club statistics processing
+    - `rag/`: Contains all RAG related code
+      - `fantasy_rag.py`: RAG dataset creation, and retrival
+    - `trainer/`: Training processes and utils
+      - `fantsy_data_collator.py`: Data Collator
+      - `fantasy_dataset.py`: Load and preprocess datasets
+      - `fantasy_trainer`: Model training, evaluation and loss calculations
+      - `fantasy_loss.py`: Custom loss
+    - `metrics/fantasy_metrics.py`: Custom metrics
   - `config/`: Configuration files
-- `data/`: Data directory (not included in repository)
+- `data/`: Data directory (data not include in repository)
 - `main.py`: Entry point for all operations
 
 ## Future Work
@@ -95,6 +84,7 @@ The project uses Hydra for configuration management. The main configuration file
 - Implement LangChain for improved language model interactions
 - Explore advanced RAG methods for better information retrieval
 - Incorporate Reinforcement Learning for team optimization
+- Utilize larger models for better performance
 
 ## Contributing
 

@@ -1,0 +1,6 @@
+# Ignore all files except these
+*
+
+# Allow specific files/folders
+!requirements.txt
+!Dockerfile

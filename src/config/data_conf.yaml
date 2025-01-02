@@ -1,0 +1,21 @@
+defaults:
+  - _self_
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+
+bucket_name: 'deep-learning-projects'
+s3_raw_data_dir: 'fantasy-football-agent/data/raw'
+s3_processed_data_dir: 'fantasy-football-agent/data/processed'
+
+raw_data_dir: 'data/raw-csvs'
+processed_data_dir: 'data/processed'
+process_raw_data: False
+create_text_data: False
+generate_data: False
+start_year: 2018
+test_year: 2023
